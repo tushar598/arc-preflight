@@ -88,3 +88,17 @@ export const MIN_BASE_FEE_WEI = 20n * 10n ** 9n
  * Actual gas varies by contract complexity and state.
  */
 export const USDC_TRANSFER_GAS_ESTIMATE = 34_000n
+
+/**
+ * A known OFAC-sanctioned Ethereum address that is blocklisted on Arc Mainnet.
+ *
+ * This is a Lazarus Group mixer address confirmed on the OFAC SDN list.
+ * Use it for mainnet demos and testing — transfer simulations to this address
+ * will return `safe: false` with `revertReason: "Blocked address"` on mainnet.
+ *
+ * ⚠️  Do NOT send real funds to this address.
+ *
+ * Source: OFAC SDN list; confirmed via eth_call on rpc.mainnet.arc.io
+ */
+export const MAINNET_DEMO_BLOCKED_ADDRESS =
+  '0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b' as const

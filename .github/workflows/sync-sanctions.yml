@@ -1,0 +1,55 @@
+name: Sync OFAC Sanctions List
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  sync:
+    # Only run when a PR is actually merged (not just closed)
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync OFAC sanctions list
+        id: sync
+        run: npx tsx scripts/sync-lists.ts
+        # If OFAC endpoint is down, don't fail the job — leave existing JSON unchanged
+        continue-on-error: true
+
+      - name: Report sync status
+        if: steps.sync.outcome == 'failure'
+        run: |
+          echo "⚠️  WARNING: OFAC sync failed. Existing sanctions.json left unchanged."
+          echo "   This may be a temporary OFAC endpoint issue. Will retry on next PR merge."
+
+      - name: Commit updated sanctions.json
+        if: steps.sync.outcome == 'success'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Only commit if the file actually changed
+          if git diff --quiet packages/arc-preflight/data/sanctions.json; then
+            echo "✓ sanctions.json unchanged — nothing to commit"
+          else
+            git add packages/arc-preflight/data/sanctions.json
+            git commit -m "chore: update OFAC sanctions list $(date -u +%Y-%m-%d) [skip ci]"
+            git push
+            echo "✅ sanctions.json updated and committed"
+          fi
