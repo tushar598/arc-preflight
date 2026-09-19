@@ -1,0 +1,32 @@
+{
+  "name": "arc-preflight",
+  "version": "0.1.0",
+  "description": "Zero-infrastructure preflight check for USDC transfers on Arc — know if a transfer will revert before paying gas.",
+  "keywords": ["arc", "usdc", "preflight", "blocklist", "viem", "web3"],
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch"
+  },
+  "peerDependencies": {
+    "viem": ">=2.0.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "^5.0.0",
+    "viem": "^2.56.8"
+  }
+}

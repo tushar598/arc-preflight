@@ -1,12 +1,15 @@
 {
-  "name": "arc-preflight",
+  "name": "arc-preflight-app",
   "version": "0.1.0",
   "private": true,
+  "workspaces": ["packages/*"],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "sdk:build": "npm run build -w arc-preflight",
+    "sdk:typecheck": "npm run typecheck -w arc-preflight"
   },
   "dependencies": {
     "next": "16.3.5",
@@ -21,6 +24,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.23.13",
+    "typescript": "^5",
+    "viem": "^2.56.8"
   }
 }
