@@ -87,6 +87,15 @@ async function probeEthers(
     )
   }
 
+  // --- Step 0: Check the optional local cache ---
+  if (options.cache?.has(recipient)) {
+    return {
+      safe: false,
+      revertReason: 'Blocked address (cached)',
+      gasEstimate: 0n, // Fast path bypasses gas estimation
+    }
+  }
+
   // Build the stateOverride: give sender a virtual 10^24 wei balance
   // so the probe can reach Arc's blocklist check without OutOfFunds
   const stateOverride = {

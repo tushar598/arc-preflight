@@ -102,3 +102,20 @@ export const USDC_TRANSFER_GAS_ESTIMATE = 34_000n
  */
 export const MAINNET_DEMO_BLOCKED_ADDRESS =
   '0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b' as const
+
+/**
+ * Minimal ABI for USDC FiatTokenV2 blocklist events.
+ * Used by the optional local BlocklistCache.
+ */
+export const USDC_EVENTS_ABI = [
+  {
+    type: 'event',
+    name: 'Blacklisted',
+    inputs: [{ name: '_account', type: 'address', indexed: true }],
+  },
+  {
+    type: 'event',
+    name: 'UnBlacklisted',
+    inputs: [{ name: '_account', type: 'address', indexed: true }],
+  },
+] as const

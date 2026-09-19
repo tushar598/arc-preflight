@@ -12,6 +12,18 @@ var TESTNET_BLOCKLISTED_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 var MIN_BASE_FEE_WEI = 20n * 10n ** 9n;
 var USDC_TRANSFER_GAS_ESTIMATE = 34000n;
 var MAINNET_DEMO_BLOCKED_ADDRESS = "0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b";
+var USDC_EVENTS_ABI = [
+  {
+    type: "event",
+    name: "Blacklisted",
+    inputs: [{ name: "_account", type: "address", indexed: true }]
+  },
+  {
+    type: "event",
+    name: "UnBlacklisted",
+    inputs: [{ name: "_account", type: "address", indexed: true }]
+  }
+];
 
 // src/probe.ts
 function extractRevertReason(err) {
@@ -62,6 +74,14 @@ async function probe(sender, recipient, client, options = {}) {
     throw new RangeError(
       "arc-preflight: simulatedValue must be > 0. A zero-value send does not trigger Arc's blocklist check."
     );
+  }
+  if (options.cache?.has(recipient)) {
+    return {
+      safe: false,
+      revertReason: "Blocked address (cached)",
+      gasEstimate: 0n
+      // Fast path bypasses gas estimation
+    };
   }
   try {
     await client.call({
@@ -194,6 +214,14 @@ async function probeEthers(sender, recipient, provider, options = {}) {
     throw new RangeError(
       "arc-preflight: simulatedValue must be > 0. A zero-value send does not trigger Arc's blocklist check."
     );
+  }
+  if (options.cache?.has(recipient)) {
+    return {
+      safe: false,
+      revertReason: "Blocked address (cached)",
+      gasEstimate: 0n
+      // Fast path bypasses gas estimation
+    };
   }
   const stateOverride = {
     [sender]: {
@@ -425,6 +453,46 @@ function checkSanctions(address) {
 }
 var sanctionsVersion = data.version;
 var sanctionsCount = data.count;
+
+// src/cache.ts
+import "viem";
+function createBlocklistCache(client) {
+  const blocklist = /* @__PURE__ */ new Set();
+  let unwatch = null;
+  return {
+    get isRunning() {
+      return unwatch !== null;
+    },
+    has(address) {
+      return blocklist.has(address.toLowerCase());
+    },
+    start() {
+      if (unwatch) return;
+      unwatch = client.watchContractEvent({
+        address: USDC_ADDRESS,
+        abi: USDC_EVENTS_ABI,
+        onLogs: (logs) => {
+          for (const log of logs) {
+            const eventName = log.eventName;
+            const account = log.args._account?.toLowerCase();
+            if (!account) continue;
+            if (eventName === "Blacklisted") {
+              blocklist.add(account);
+            } else if (eventName === "UnBlacklisted") {
+              blocklist.delete(account);
+            }
+          }
+        }
+      });
+    },
+    stop() {
+      if (unwatch) {
+        unwatch();
+        unwatch = null;
+      }
+    }
+  };
+}
 export {
   ARC_MAINNET_CHAIN_ID,
   ARC_MAINNET_EXPLORER_URL,
@@ -439,8 +507,10 @@ export {
   PreflightError,
   TESTNET_BLOCKLISTED_ADDRESS,
   USDC_ADDRESS,
+  USDC_EVENTS_ABI,
   USDC_TRANSFER_GAS_ESTIMATE,
   checkSanctions,
+  createBlocklistCache,
   preflight,
   preflightEthers,
   sanctionsCount,

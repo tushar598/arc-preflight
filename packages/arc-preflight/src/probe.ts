@@ -143,6 +143,15 @@ export async function probe(
     )
   }
 
+  // --- Step 0: Check the optional local cache ---
+  if (options.cache?.has(recipient)) {
+    return {
+      safe: false,
+      revertReason: 'Blocked address (cached)',
+      gasEstimate: 0n, // Fast path bypasses gas estimation
+    }
+  }
+
   // --- Step 1: Simulate a native USDC send via eth_call ---
   // Arc's runtime-transfer-check fires on any native value transfer to/from
   // a blocklisted address. We provide virtual balance via stateOverride so

@@ -46,6 +46,20 @@ type PreflightResult = {
     gasEstimate: bigint;
 };
 /**
+ * A local cache that tracks on-chain blocklist events (e.g. USDC Blacklisted).
+ * Used to skip the RPC preflight check for known blocked addresses.
+ */
+interface BlocklistCache {
+    /** Returns true if the address is currently in the local cache */
+    has(address: string): boolean;
+    /** Starts the event listener */
+    start(): void;
+    /** Stops the event listener */
+    stop(): void;
+    /** Returns true if the event listener is currently active */
+    get isRunning(): boolean;
+}
+/**
  * Options accepted by `preflight()`.
  */
 type PreflightOptions = {
@@ -59,6 +73,12 @@ type PreflightOptions = {
      * Do NOT use 0 — a zero-value send does not trigger the blocklist check.
      */
     simulatedValue?: bigint;
+    /**
+     * Optional local blocklist cache. If provided and the recipient is
+     * found in the cache, the preflight will return safe:false immediately
+     * without making an RPC call.
+     */
+    cache?: BlocklistCache;
 };
 
 /**
@@ -287,6 +307,15 @@ declare const sanctionsVersion: string;
 declare const sanctionsCount: number;
 
 /**
+ * Creates an event-driven blocklist cache that listens to on-chain
+ * USDC Blacklisted/UnBlacklisted events.
+ *
+ * @param client Viem PublicClient used to listen for events
+ * @returns A BlocklistCache instance to pass into preflight options
+ */
+declare function createBlocklistCache(client: PublicClient): BlocklistCache;
+
+/**
  * constants.ts
  *
  * Arc chain and contract constants.
@@ -372,5 +401,26 @@ declare const USDC_TRANSFER_GAS_ESTIMATE = 34000n;
  * Source: OFAC SDN list; confirmed via eth_call on rpc.mainnet.arc.io
  */
 declare const MAINNET_DEMO_BLOCKED_ADDRESS: "0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b";
+/**
+ * Minimal ABI for USDC FiatTokenV2 blocklist events.
+ * Used by the optional local BlocklistCache.
+ */
+declare const USDC_EVENTS_ABI: readonly [{
+    readonly type: "event";
+    readonly name: "Blacklisted";
+    readonly inputs: readonly [{
+        readonly name: "_account";
+        readonly type: "address";
+        readonly indexed: true;
+    }];
+}, {
+    readonly type: "event";
+    readonly name: "UnBlacklisted";
+    readonly inputs: readonly [{
+        readonly name: "_account";
+        readonly type: "address";
+        readonly indexed: true;
+    }];
+}];
 
-export { ARC_MAINNET_CHAIN_ID, ARC_MAINNET_EXPLORER_URL, ARC_MAINNET_RPC_URL, ARC_TESTNET_CHAIN_ID, ARC_TESTNET_EXPLORER_URL, ARC_TESTNET_RPC_URL, MAINNET_DEMO_BLOCKED_ADDRESS, MEMO_ADDRESS, MIN_BASE_FEE_WEI, MULTICALL3FROM_ADDRESS, PreflightError, type PreflightOptions, type PreflightResult, TESTNET_BLOCKLISTED_ADDRESS, USDC_ADDRESS, USDC_TRANSFER_GAS_ESTIMATE, checkSanctions, preflight, preflightEthers, sanctionsCount, sanctionsVersion, withPreflight, withPreflightEthers };
+export { ARC_MAINNET_CHAIN_ID, ARC_MAINNET_EXPLORER_URL, ARC_MAINNET_RPC_URL, ARC_TESTNET_CHAIN_ID, ARC_TESTNET_EXPLORER_URL, ARC_TESTNET_RPC_URL, type BlocklistCache, MAINNET_DEMO_BLOCKED_ADDRESS, MEMO_ADDRESS, MIN_BASE_FEE_WEI, MULTICALL3FROM_ADDRESS, PreflightError, type PreflightOptions, type PreflightResult, TESTNET_BLOCKLISTED_ADDRESS, USDC_ADDRESS, USDC_EVENTS_ABI, USDC_TRANSFER_GAS_ESTIMATE, checkSanctions, createBlocklistCache, preflight, preflightEthers, sanctionsCount, sanctionsVersion, withPreflight, withPreflightEthers };

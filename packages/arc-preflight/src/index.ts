@@ -19,13 +19,16 @@ export { preflight, withPreflight } from './adapters/viem.js'
 export { preflightEthers, withPreflightEthers } from './adapters/ethers.js'
 
 // Types
-export type { PreflightResult, PreflightOptions, Address } from './types.js'
+export type { PreflightResult, PreflightOptions, BlocklistCache, Address } from './types.js'
 
 // Errors
 export { PreflightError } from './errors.js'
 
 // Sanctions data (offline OFAC check)
 export { checkSanctions, sanctionsVersion, sanctionsCount } from './sanctions.js'
+
+// Cache (Local Event Cache)
+export { createBlocklistCache } from './cache.js'
 
 // Constants — exported for callers who want to reference Arc addresses
 export {
@@ -42,4 +45,5 @@ export {
   MAINNET_DEMO_BLOCKED_ADDRESS,
   MIN_BASE_FEE_WEI,
   USDC_TRANSFER_GAS_ESTIMATE,
+  USDC_EVENTS_ABI,
 } from './constants.js'
