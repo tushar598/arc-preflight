@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { createPublicClient, http } from 'viem'
+import { createPublicClient, http, type WalletClient } from 'viem'
 import {
   preflight,
   withPreflight,
@@ -79,12 +79,12 @@ describe('preflight() — Arc Testnet live', () => {
         walletCalled = true
         return '0xmockhash' as `0x${string}`
       },
-    } as any
+    } as unknown as WalletClient
 
     const guarded = withPreflight(mockWallet, client)
 
     await expect(
-      guarded.sendTransaction({ to: BLOCKED, value: 1n }),
+      guarded.sendTransaction({ to: BLOCKED, value: 1n, account: SENDER, chain: null }),
     ).rejects.toThrow(PreflightError)
 
     // Wallet must NOT have been called — the error fires before submission
@@ -99,10 +99,10 @@ describe('preflight() — Arc Testnet live', () => {
         walletCalled = true
         return '0xmockhash' as `0x${string}`
       },
-    } as any
+    } as unknown as WalletClient
 
     const guarded = withPreflight(mockWallet, client)
-    const hash = await guarded.sendTransaction({ to: CLEAN, value: 1n })
+    const hash = await guarded.sendTransaction({ to: CLEAN, value: 1n, account: SENDER, chain: null })
 
     expect(walletCalled).toBe(true)
     expect(hash).toBe('0xmockhash')
