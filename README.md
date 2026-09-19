@@ -119,6 +119,7 @@ app/ components/ lib/     the Next.js demo, deployed against Arc mainnet public 
 scripts/sync-lists.ts     OFAC SDN → data/sanctions.json (weekly GitHub Action)
 docs/                     data-sources.md, limitations.md, submission.md
 JUDGES.md                 60-second click path
+NEXT-STEPS.md             how to test, deploy, publish, submit
 ```
 
 Local:
