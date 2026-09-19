@@ -7,6 +7,10 @@ on:
     types: [closed]
   workflow_dispatch: # Allow manual trigger
 
+concurrency:
+  group: sanctions-sync
+  cancel-in-progress: false
+
 jobs:
   sync:
     # Only run when a PR is actually merged (not just closed)
@@ -22,7 +26,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -38,7 +42,7 @@ jobs:
         if: steps.sync.outcome == 'failure'
         run: |
           echo "⚠️  WARNING: OFAC sync failed. Existing sanctions.json left unchanged."
-          echo "   This may be a temporary OFAC endpoint issue. Will retry on next PR merge."
+          echo "   This may be a temporary OFAC endpoint issue. Will retry on the next weekly run."
 
       - name: Commit updated sanctions.json
         if: steps.sync.outcome == 'success'

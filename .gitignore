@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# SDK build output — built by CI / `npm run sdk:build` / prepublishOnly, never committed
+packages/arc-preflight/dist/

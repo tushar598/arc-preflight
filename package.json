@@ -7,11 +7,17 @@
   ],
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "predev": "npm run sdk:build",
+    "build": "npm run sdk:build && next build",
+    "build:app": "next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "sdk:build": "npm run build -w arc-preflight",
-    "sdk:typecheck": "npm run typecheck -w arc-preflight"
+    "sdk:typecheck": "npm run typecheck -w arc-preflight",
+    "sdk:test": "npm run test -w arc-preflight",
+    "sdk:test:live": "npm run test:live -w arc-preflight",
+    "sync:sanctions": "tsx scripts/sync-lists.ts"
   },
   "dependencies": {
     "@rainbow-me/rainbowkit": "^2.2.11",

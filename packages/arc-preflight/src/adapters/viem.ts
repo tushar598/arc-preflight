@@ -4,8 +4,9 @@
  * Viem adapter for arc-preflight.
  *
  * Exports:
- *   - `preflight()` — one-shot preflight check for a single transfer
- *   - `withPreflight()` — wraps a WalletClient with automatic preflight guards
+ *   - `preflight()`      — one-shot preflight check for a single transfer
+ *   - `preflightMany()`  — one sender, many recipients
+ *   - `withPreflight()`  — wraps a WalletClient with automatic preflight guards
  */
 
 import type {
@@ -14,10 +15,13 @@ import type {
   WalletClient,
   SendTransactionParameters,
   Hash,
+  Hex,
 } from 'viem'
-import { probe } from '../probe.js'
+import { probe, runPreflight } from '../probe.js'
+import { runPreflightMany, type PreflightManyOptions } from '../batch.js'
+import { transportFromViem } from '../transport.js'
 import { PreflightError } from '../errors.js'
-import type { PreflightResult, PreflightOptions } from '../types.js'
+import type { PreflightResult, PreflightOptions, PreflightManyResult } from '../types.js'
 
 // ---------------------------------------------------------------------------
 // preflight() — standalone function
@@ -27,31 +31,26 @@ import type { PreflightResult, PreflightOptions } from '../types.js'
  * Checks whether a native USDC transfer from `sender` to `recipient` would
  * revert on Arc before submitting anything to the chain.
  *
- * Uses Arc's own runtime via `eth_call` — any address that is blocklisted
- * will cause the simulated call to revert, and you get the exact revert reason.
+ * Runs four layers — OFAC snapshot, local cache, `USDC.isBlacklisted()`, and
+ * an `eth_call` simulation of the native send — and reports which one fired.
  *
  * @example
  * ```ts
  * import { createPublicClient, http } from 'viem'
- * import { preflight } from 'arc-preflight'
+ * import { preflight, ARC_MAINNET_RPC_URL } from 'arc-preflight'
  *
- * const client = createPublicClient({ transport: http('https://rpc.testnet.arc.network') })
- *
- * const result = await preflight(
- *   '0xYourSender',
- *   '0xRecipient',
- *   client,
- * )
+ * const client = createPublicClient({ transport: http(ARC_MAINNET_RPC_URL) })
+ * const result = await preflight('0xYourSender', '0xRecipient', client)
  *
  * if (!result.safe) {
- *   console.error('Transfer blocked:', result.revertReason)
+ *   console.error(`Blocked [${result.reasonCode}] via ${result.layer}:`, result.revertReason)
  * }
  * ```
  *
  * @param sender    - The address initiating the transfer
  * @param recipient - The destination address
  * @param client    - A Viem PublicClient connected to an Arc node
- * @param options   - Optional configuration (simulatedValue, etc.)
+ * @param options   - Optional configuration (simulatedValue, cache, data)
  */
 export async function preflight(
   sender: Address,
@@ -59,7 +58,24 @@ export async function preflight(
   client: PublicClient,
   options?: PreflightOptions,
 ): Promise<PreflightResult> {
-  return probe(sender, recipient, client, options)
+  return probe(sender, recipient, transportFromViem(client), options)
+}
+
+/**
+ * Checks one sender against many recipients with bounded concurrency.
+ *
+ * @example
+ * ```ts
+ * const { results, blockedCount } = await preflightMany(agent, payees, client)
+ * ```
+ */
+export async function preflightMany(
+  sender: Address,
+  recipients: readonly Address[],
+  client: PublicClient,
+  options?: PreflightManyOptions,
+): Promise<PreflightManyResult> {
+  return runPreflightMany(sender, recipients, transportFromViem(client), options)
 }
 
 // ---------------------------------------------------------------------------
@@ -69,28 +85,23 @@ export async function preflight(
 /**
  * Wraps a Viem WalletClient with an automatic preflight guard.
  *
- * Every call to `sendTransaction` on the returned client will first run a
- * preflight check. If the transfer would revert, a `PreflightError` is thrown
- * BEFORE any gas is spent.
+ * Every call to `sendTransaction` on the returned client first runs the
+ * layered preflight against the transaction's native value AND any transfers
+ * encoded in its calldata (ERC-20 `transfer`, Memo, Multicall3From). If the
+ * transfer would revert, a `PreflightError` is thrown BEFORE any gas is spent.
  *
- * NOTE: Transactions with a `value` of `0` (or `undefined`) skip the preflight check, 
- * as zero-value transactions do not trigger Arc's runtime transfer blocklist.
+ * A transaction with `value: 0` and calldata the SDK cannot decode is passed
+ * through unchecked — there is nothing for the blocklist to act on.
  *
  * @example
  * ```ts
- * import { createWalletClient, createPublicClient, http } from 'viem'
- * import { withPreflight, PreflightError } from 'arc-preflight'
- *
- * const walletClient = createWalletClient({ ... })
- * const publicClient = createPublicClient({ ... })
- *
  * const guardedClient = withPreflight(walletClient, publicClient)
  *
  * try {
  *   const hash = await guardedClient.sendTransaction({ to: recipient, value: amount })
  * } catch (err) {
  *   if (err instanceof PreflightError) {
- *     console.log('Blocked before submission:', err.revertReason)
+ *     console.log('Blocked before submission:', err.reasonCode, err.revertReason)
  *   }
  * }
  * ```
@@ -106,47 +117,48 @@ export function withPreflight(
   publicClient: PublicClient,
   options?: PreflightOptions,
 ): WalletClient & { __preflight: true } {
+  const transport = transportFromViem(publicClient)
+
   const guardedClient = new Proxy(walletClient, {
     get(target, prop, receiver) {
+      if (prop === '__preflight') return true
       if (prop !== 'sendTransaction') {
         return Reflect.get(target, prop, receiver)
       }
 
-      // Return a wrapped sendTransaction that runs preflight first
       return async (params: SendTransactionParameters): Promise<Hash> => {
-        // Determine sender — prefer params.account, fall back to walletClient.account
         const account = params.account ?? walletClient.account
         const sender: Address | undefined =
           typeof account === 'string'
             ? account
             : (account as { address?: Address })?.address
 
-        // Determine recipient (to)
-        const recipient = params.to
+        const recipient = params.to ?? undefined
+        const value = params.value ?? 0n
+        const data = (params.data ?? undefined) as Hex | undefined
 
-        // Only gate on transfers that have a recipient and sender
-        if (sender && recipient && (params.value ?? 0n) > 0n) {
-          const result = await probe(
-            sender,
-            recipient,
-            publicClient,
-            {
-              simulatedValue: params.value ?? 1n,
-              ...options,
-            },
-          )
+        if (sender && recipient && (value > 0n || data)) {
+          let result: PreflightResult | null = null
+          try {
+            result = await runPreflight(
+              transport,
+              { from: sender, to: recipient, value, data },
+              { ...options, data },
+            )
+          } catch (err) {
+            // Nothing decodable to check (value 0 + unknown calldata) — pass through.
+            if (!(err instanceof RangeError)) throw err
+          }
 
-          if (!result.safe) {
-            throw new PreflightError(result.revertReason ?? 'execution reverted')
+          if (result && !result.safe) {
+            throw new PreflightError(result.revertReason ?? 'execution reverted', result)
           }
         }
 
-        // Preflight passed (or skipped for zero-value sends) — forward to wallet
         return target.sendTransaction(params)
       }
     },
   })
 
-  // Tag the proxy so callers can detect it
-  return Object.assign(guardedClient, { __preflight: true as const })
+  return guardedClient as WalletClient & { __preflight: true }
 }

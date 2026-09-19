@@ -1,7 +1,8 @@
 /**
  * probe.ts
  *
- * Core preflight probe for the arc-preflight SDK.
+ * Core preflight engine for the arc-preflight SDK, shared by the viem and
+ * ethers adapters via the minimal `RpcTransport` interface.
  *
  * How it works:
  *   Arc enforces its runtime blocklist check on the NATIVE value transfer path.
@@ -9,201 +10,307 @@
  *   protocol level before any EVM execution. This fires during eth_call too —
  *   meaning we can detect the revert WITHOUT submitting a transaction.
  *
- *   This module simulates a native USDC send of `simulatedValue` wei (default: 1n)
- *   using `client.call()`. If the call reverts, the transfer would revert on-chain.
+ * Layers (evaluated in order, short-circuit on first BLOCKLIST proof):
+ *   1. sanctions     — embedded OFAC SDN snapshot, offline, zero latency
+ *   2. cache         — optional local event cache of USDC Blacklisted events
+ *   3. isBlacklisted — `USDC.isBlacklisted(addr)` via eth_call (skipped if absent)
+ *   4. simulation    — eth_call of a native send with stateOverride; ground truth
+ *                      for zero-address, precompile and burn rules too.
  *
- * IMPORTANT: Do NOT use the ERC-20 `transfer()` function for this probe.
+ * IMPORTANT: Do NOT use the ERC-20 `transfer()` function for the simulation.
  *   The ERC-20 path checks balance BEFORE the blocklist, so a zero-balance
- *   sender will get "ERC20: transfer amount exceeds balance" — not the blocklist
+ *   sender gets "ERC20: transfer amount exceeds balance" — not the blocklist
  *   revert. The native send path always reaches the blocklist check regardless
- *   of balance.
+ *   of balance (we give the sender a virtual balance via stateOverride).
  *
  * Sources:
- *   - https://docs.arc.network/arc/references/evm-differences#value-transfer-rules
+ *   - https://docs.arc.io/arc/references/evm-differences#value-transfer-rules
  */
 
-import type { Address, PublicClient } from 'viem'
-import type { PreflightResult, PreflightOptions } from './types.js'
-import { USDC_TRANSFER_GAS_ESTIMATE } from './constants.js'
+import { encodeFunctionData, type Address, type Hex } from 'viem'
+import type {
+  PreflightResult,
+  PreflightOptions,
+  RpcTransport,
+  TransferIntent,
+  PreflightLayer,
+} from './types.js'
+import { USDC_ADDRESS, USDC_BLACKLIST_ABI, USDC_TRANSFER_GAS_ESTIMATE } from './constants.js'
+import { extractRevertReason, classifyRevert } from './revert.js'
+import { checkSanctions } from './sanctions.js'
+import { decodeTransferIntents } from './calldata.js'
 
 // ---------------------------------------------------------------------------
-// Revert reason extraction helpers
+// Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Extracts a human-readable revert reason from a Viem call error.
- *
- * Viem surfaces error information in multiple ways depending on the RPC
- * implementation. We try each source in order of reliability:
- *
- * 1. `shortMessage` — Viem's cleaned-up one-liner (most reliable)
- * 2. ABI-decoded `Error(string)` from `cause.data` (0x08c379a0 prefix)
- * 3. Regex extraction from the raw error message string
- * 4. Fallback generic string
- */
-function extractRevertReason(err: unknown): string {
-  if (err == null) return 'unknown error'
+/** Virtual balance granted to the sender during simulation: 1,000,000 USDC (18 decimals). */
+const VIRTUAL_BALANCE_HEX = '0x' + (10n ** 24n).toString(16)
 
-  // 1. Try to ABI-decode from cause.data (Error(string) = 0x08c379a0...)
-  const causeData: string | undefined =
-    (err as { cause?: { data?: string } })?.cause?.data ??
-    (err as { data?: string })?.data
+const toHex = (n: bigint): Hex => `0x${n.toString(16)}`
 
-  if (causeData?.startsWith('0x08c379a0')) {
-    // Error(string) ABI encoding: 4-byte selector + 32-byte offset + 32-byte length + string
-    try {
-      // Skip the 4-byte selector (8 hex chars after "0x"), then decode the UTF-8 string
-      const hex = causeData.slice(10) // remove '0x' + 4-byte selector
-      const offsetHex = hex.slice(0, 64)
-      const offset = parseInt(offsetHex, 16) * 2 // in nibbles
-      const lengthHex = hex.slice(offset, offset + 64)
-      const length = parseInt(lengthHex, 16)
-      const strHex = hex.slice(offset + 64, offset + 64 + length * 2)
-      const decoded = new TextDecoder().decode(
-        new Uint8Array(strHex.match(/.{2}/g)!.map(b => parseInt(b, 16)))
-      )
-      if (decoded) return decoded
-    } catch {
-      // Manual decode failed — fall through
-    }
+function looksLikeStateOverrideRejection(err: unknown): boolean {
+  const s = String(
+    (err as { message?: string })?.message ?? (err as { details?: string })?.details ?? err,
+  ).toLowerCase()
+  return (
+    s.includes('stateoverride') ||
+    s.includes('state override') ||
+    s.includes('too many arguments') ||
+    s.includes('invalid argument 2') ||
+    s.includes('method not found') ||
+    s.includes('unsupported')
+  )
+}
+
+function blocked(
+  revertReason: string,
+  layer: PreflightLayer,
+  recipientsChecked: Address[],
+  code: PreflightResult['reasonCode'] = 'BLOCKLIST',
+): PreflightResult {
+  return {
+    safe: false,
+    revertReason,
+    reasonCode: code,
+    gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
+    layer,
+    recipientsChecked,
   }
-
-  // 2. Node-level details (e.g. Arc node returns "Blocked address" in details)
-  const details =
-    (err as { details?: string })?.details ??
-    (err as { cause?: { details?: string } })?.cause?.details
-  if (details && typeof details === 'string') {
-    const cleaned = details.replace(/^revert:\s*/i, '').trim()
-    if (
-      cleaned &&
-      !cleaned.toLowerCase().includes('transaction creation failed') &&
-      !cleaned.toLowerCase().includes('an internal error was received')
-    ) {
-      return cleaned
-    }
-  }
-
-  // 3. Regex extraction from the full error message string
-  const errStr = String((err as { message?: string })?.message || err)
-  const patterns = [
-    /Blocked address/i,
-    /runtime-transfer-check/i,
-    /reverted(?:\s+with\s+reason)?:\s*(.+?)(?:\.|$)/i,
-    /Revert:\s*(.+?)(?:\.|$)/i,
-    /reason:\s*(.+?)(?:\.|$)/i,
-  ]
-  for (const pattern of patterns) {
-    const match = errStr.match(pattern)
-    if (match?.[1]) return match[1].trim()
-    if (match?.[0]) return match[0]
-  }
-
-  // 4. Viem's shortMessage (if not a generic wrapper string)
-  const shortMessage = (err as { shortMessage?: string }).shortMessage
-  if (
-    shortMessage &&
-    !shortMessage.toLowerCase().includes('transaction creation failed') &&
-    !shortMessage.toLowerCase().includes('an internal error was received')
-  ) {
-    return shortMessage
-  }
-
-  // 5. Generic fallback
-  return shortMessage || 'execution reverted'
 }
 
 // ---------------------------------------------------------------------------
-// Main probe function
+// Layer 3 — USDC.isBlacklisted()
 // ---------------------------------------------------------------------------
 
 /**
- * Probes whether a native USDC transfer from `sender` to `recipient` would
- * succeed or revert on Arc, using `eth_call` simulation.
- *
- * This is the core engine of the arc-preflight SDK. It should not be called
- * directly by most consumers — use the `preflight()` function exported from
- * the Viem adapter instead.
- *
- * @param sender    - The address initiating the transfer (from)
- * @param recipient - The address receiving the transfer (to)
- * @param client    - A Viem PublicClient connected to an Arc node
- * @param options   - Optional probe configuration
- * @returns PreflightResult with safe flag, revert reason, and gas estimate
+ * Calls `USDC.isBlacklisted(address)`. Returns `null` (not `false`) when the
+ * call itself fails, so the caller can distinguish "not blocked" from
+ * "could not check" and degrade gracefully.
  */
-export async function probe(
+export async function isBlacklisted(
+  transport: RpcTransport,
+  address: Address,
+): Promise<boolean | null> {
+  try {
+    const data = encodeFunctionData({
+      abi: USDC_BLACKLIST_ABI,
+      functionName: 'isBlacklisted',
+      args: [address],
+    })
+    const result = await transport.request({
+      method: 'eth_call',
+      params: [{ to: USDC_ADDRESS, data }, 'latest'],
+    })
+    if (typeof result !== 'string' || !result.startsWith('0x') || result.length < 66) return null
+    return BigInt(result) === 1n
+  } catch {
+    return null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Layer 4 — native value simulation
+// ---------------------------------------------------------------------------
+
+type SimulationOutcome =
+  | { reverted: false }
+  | { reverted: true; reason: string }
+
+/**
+ * Simulates a native USDC send of `value` wei from `sender` to `recipient`
+ * with a virtual sender balance. Falls back to a plain eth_call when the RPC
+ * rejects the stateOverride parameter.
+ */
+export async function simulateNativeSend(
+  transport: RpcTransport,
   sender: Address,
   recipient: Address,
-  client: PublicClient,
+  value: bigint,
+): Promise<SimulationOutcome> {
+  const tx = { from: sender, to: recipient, value: toHex(value) }
+  const stateOverride = { [sender]: { balance: VIRTUAL_BALANCE_HEX } }
+
+  try {
+    await transport.request({ method: 'eth_call', params: [tx, 'latest', stateOverride] })
+    return { reverted: false }
+  } catch (err) {
+    if (!looksLikeStateOverrideRejection(err)) {
+      return { reverted: true, reason: extractRevertReason(err) }
+    }
+  }
+
+  // RPC rejected stateOverride — retry without it.
+  try {
+    await transport.request({ method: 'eth_call', params: [tx, 'latest'] })
+    return { reverted: false }
+  } catch (err) {
+    return { reverted: true, reason: extractRevertReason(err) }
+  }
+}
+
+/**
+ * Live gas estimate for a native send. Returns `null` on any failure so the
+ * caller can substitute the documented fallback constant.
+ */
+export async function estimateNativeSendGas(
+  transport: RpcTransport,
+  sender: Address,
+  recipient: Address,
+  value: bigint,
+  data?: Hex,
+): Promise<bigint | null> {
+  const tx: Record<string, string> = { from: sender, to: recipient, value: toHex(value) }
+  if (data) tx.data = data
+  const stateOverride = { [sender]: { balance: VIRTUAL_BALANCE_HEX } }
+
+  const parse = (r: unknown): bigint | null =>
+    typeof r === 'string' && r.startsWith('0x') ? BigInt(r) : null
+
+  try {
+    return parse(await transport.request({ method: 'eth_estimateGas', params: [tx, 'latest', stateOverride] }))
+  } catch (err) {
+    if (!looksLikeStateOverrideRejection(err)) return null
+  }
+  try {
+    return parse(await transport.request({ method: 'eth_estimateGas', params: [tx] }))
+  } catch {
+    return null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Layered check for ONE sender → recipient pair
+// ---------------------------------------------------------------------------
+
+type PairVerdict =
+  | { safe: true }
+  | { safe: false; reason: string; layer: PreflightLayer; code: PreflightResult['reasonCode'] }
+
+async function checkPair(
+  transport: RpcTransport,
+  intent: TransferIntent,
+  options: PreflightOptions,
+  blacklistMemo: Map<string, Promise<boolean | null>>,
+): Promise<PairVerdict> {
+  const { from, to } = intent
+
+  // (a) sanctions — offline
+  const sanctionedSide = checkSanctions(to) ? to : checkSanctions(from) ? from : null
+  if (sanctionedSide) {
+    return {
+      safe: false,
+      reason: `Blocked address (OFAC SDN: ${sanctionedSide})`,
+      layer: 'sanctions',
+      code: 'BLOCKLIST',
+    }
+  }
+
+  // (b) local event cache — offline
+  if (options.cache?.has(to) || options.cache?.has(from)) {
+    return { safe: false, reason: 'Blocked address (cached)', layer: 'cache', code: 'BLOCKLIST' }
+  }
+
+  // (c) USDC.isBlacklisted() — one eth_call per side, memoised per run
+  const ask = (a: Address) => {
+    const k = a.toLowerCase()
+    let p = blacklistMemo.get(k)
+    if (!p) {
+      p = isBlacklisted(transport, a)
+      blacklistMemo.set(k, p)
+    }
+    return p
+  }
+  const [toBl, fromBl] = await Promise.all([ask(to), ask(from)])
+  const blSide = toBl === true ? to : fromBl === true ? from : null
+  if (blSide) {
+    return {
+      safe: false,
+      reason: `Blocked address (USDC.isBlacklisted: ${blSide})`,
+      layer: 'isBlacklisted',
+      code: 'BLOCKLIST',
+    }
+  }
+
+  // (d) simulation — ground truth; always runs unless BLOCKLIST already proven.
+  // We always simulate the NATIVE path (even for ERC-20 intents) because it is
+  // the only path guaranteed to reach the blocklist check regardless of balance.
+  const simValue = intent.via === 'native' && intent.value > 0n ? intent.value : 1n
+  const sim = await simulateNativeSend(transport, from, to, simValue)
+  if (sim.reverted) {
+    return { safe: false, reason: sim.reason, layer: 'simulation', code: classifyRevert(sim.reason, to) }
+  }
+  return { safe: true }
+}
+
+// ---------------------------------------------------------------------------
+// Public core entry points
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs the layered preflight for a transaction shape `{ from, to, value, data }`.
+ * Every sender → recipient pair discovered in the calldata is checked; the
+ * first unsafe pair decides the verdict.
+ */
+export async function runPreflight(
+  transport: RpcTransport,
+  tx: { from: Address; to: Address; value: bigint; data?: Hex },
   options: PreflightOptions = {},
 ): Promise<PreflightResult> {
-  const simulatedValue = options.simulatedValue ?? 1n
+  const intents = decodeTransferIntents({ from: tx.from, to: tx.to, value: tx.value, data: tx.data })
 
-  if (simulatedValue <= 0n) {
+  if (intents.length === 0) {
     throw new RangeError(
-      'arc-preflight: simulatedValue must be > 0. ' +
-        'A zero-value send does not trigger Arc\'s blocklist check.',
+      'arc-preflight: nothing to check — simulatedValue must be > 0 unless `data` ' +
+        'encodes a transfer. A zero-value send does not trigger Arc\'s blocklist check.',
     )
   }
 
-  // --- Step 0: Check the optional local cache ---
-  if (options.cache?.has(sender) || options.cache?.has(recipient)) {
-    return {
-      safe: false,
-      revertReason: 'Blocked address (cached)',
-      gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
+  const recipientsChecked = Array.from(new Set(intents.map((i) => i.to)))
+  const blacklistMemo = new Map<string, Promise<boolean | null>>()
+
+  for (const intent of intents) {
+    const verdict = await checkPair(transport, intent, options, blacklistMemo)
+    if (!verdict.safe) {
+      return blocked(verdict.reason, verdict.layer, recipientsChecked, verdict.code)
     }
   }
 
-  // --- Step 1: Simulate a native USDC send via eth_call ---
-  // Arc's runtime-transfer-check fires on any native value transfer to/from
-  // a blocklisted address. We provide virtual balance via stateOverride so
-  // simulation can check recipient validity without being stopped by OutOfFunds.
-  try {
-    await client.call({
-      account: sender,
-      to: recipient,
-      value: simulatedValue,
-      stateOverride: [
-        {
-          address: sender,
-          balance: 10n ** 24n, // 1,000,000 native USDC (18 decimals)
-        },
-      ],
-    })
-  } catch (err: unknown) {
-    // If stateOverride is rejected by an RPC that does not support it,
-    // retry without stateOverride
-    const errStr = String(err).toLowerCase()
-    if (
-      errStr.includes('stateoverride') ||
-      errStr.includes('state override') ||
-      errStr.includes('method not found')
-    ) {
-      try {
-        await client.call({
-          account: sender,
-          to: recipient,
-          value: simulatedValue,
-        })
-      } catch (retryErr: unknown) {
-        return {
-          safe: false,
-          revertReason: extractRevertReason(retryErr),
-          gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
-        }
-      }
-    } else {
-      return {
-        safe: false,
-        revertReason: extractRevertReason(err),
-        gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
-      }
-    }
-  }
+  // Everything is safe — get a live gas number for the real tx shape.
+  const live = await estimateNativeSendGas(transport, tx.from, tx.to, tx.value, tx.data)
 
   return {
     safe: true,
     revertReason: null,
-    gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
+    gasEstimate: live ?? USDC_TRANSFER_GAS_ESTIMATE,
+    layer: 'simulation',
+    recipientsChecked,
   }
+}
+
+/**
+ * Probes whether a native USDC transfer from `sender` to `recipient` would
+ * succeed or revert on Arc. Thin wrapper over `runPreflight` for the common
+ * "one sender, one recipient" case.
+ *
+ * @param sender    - The address initiating the transfer (from)
+ * @param recipient - The address receiving the transfer (to)
+ * @param transport - An RpcTransport connected to an Arc node
+ * @param options   - Optional probe configuration
+ */
+export async function probe(
+  sender: Address,
+  recipient: Address,
+  transport: RpcTransport,
+  options: PreflightOptions = {},
+): Promise<PreflightResult> {
+  const simulatedValue = options.simulatedValue ?? (options.data ? 0n : 1n)
+  if (simulatedValue < 0n) {
+    throw new RangeError('arc-preflight: simulatedValue must be >= 0.')
+  }
+  return runPreflight(
+    transport,
+    { from: sender, to: recipient, value: simulatedValue, data: options.data },
+    options,
+  )
 }

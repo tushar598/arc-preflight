@@ -1,37 +1,33 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import { Geist_Mono } from "next/font/google";
-import { Providers } from "./providers";
-import "./globals.css";
+import type { Metadata } from 'next'
+import { IBM_Plex_Sans, IBM_Plex_Mono } from 'next/font/google'
+import { Providers } from './providers'
+import './globals.css'
 
-const inter = Inter({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
-});
+const plexSans = IBM_Plex_Sans({
+  variable: '--font-plex-sans',
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+})
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const plexMono = IBM_Plex_Mono({
+  variable: '--font-plex-mono',
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+})
 
 export const metadata: Metadata = {
-  title: "Arc Preflight — Stop paying gas for blocked transfers",
-  description: "A zero-infrastructure SDK that intercepts USDC transfers to blocklisted addresses on Arc before they hit the network. Save gas, prevent reverts.",
-  keywords: ["arc", "preflight", "usdc", "blocklist", "web3", "viem", "ethers"],
-};
+  title: 'arc-preflight',
+  description:
+    'Know whether a USDC transfer will revert on Arc before you pay gas for it. Simulates Arc’s protocol blocklist and native transfer rules with one eth_call. No backend.',
+  keywords: ['arc', 'circle', 'usdc', 'preflight', 'blocklist', 'ofac', 'viem', 'ethers'],
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html
-      lang="en"
-      className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col" style={{ background: '#0A0B0F' }}>
-        <Providers>
-          {children}
-        </Providers>
+    <html lang="en" className={`${plexSans.variable} ${plexMono.variable}`}>
+      <body>
+        <Providers>{children}</Providers>
       </body>
     </html>
-  );
+  )
 }

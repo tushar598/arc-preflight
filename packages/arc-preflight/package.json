@@ -4,25 +4,35 @@
   "description": "Zero-infrastructure preflight check for USDC transfers on Arc — know if a transfer will revert before paying gas.",
   "keywords": [
     "arc",
+    "arc-network",
+    "circle",
     "usdc",
     "preflight",
     "blocklist",
+    "sanctions",
+    "ofac",
+    "compliance",
     "viem",
+    "ethers",
     "web3"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tusharsinghchouhan/arc-preflight.git"
+    "url": "git+https://github.com/tushar598/arc-preflight.git",
+    "directory": "packages/arc-preflight"
   },
   "bugs": {
-    "url": "https://github.com/tusharsinghchouhan/arc-preflight/issues"
+    "url": "https://github.com/tushar598/arc-preflight/issues"
   },
-  "homepage": "https://github.com/tusharsinghchouhan/arc-preflight#readme",
+  "homepage": "https://github.com/tushar598/arc-preflight#readme",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "arc-preflight": "./dist/bin.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -35,16 +45,26 @@
     "data",
     "README.md"
   ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "dev": "tsup --watch",
+    "test": "vitest run --project unit",
+    "test:live": "LIVE_RPC=1 vitest run --project live",
+    "test:all": "LIVE_RPC=1 vitest run",
+    "test:watch": "vitest --project unit",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
   },
   "peerDependencies": {
-    "viem": ">=2.0.0",
-    "ethers": ">=6.0.0"
+    "ethers": ">=6.0.0",
+    "viem": ">=2.0.0"
   },
   "peerDependenciesMeta": {
     "ethers": {
@@ -56,6 +76,7 @@
     "tsup": "^8.5.1",
     "typescript": "^5.0.0",
     "viem": "^2.56.8",
+    "vite": "^7.3.6",
     "vitest": "^5.0.1"
   }
 }

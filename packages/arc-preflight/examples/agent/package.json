@@ -7,9 +7,9 @@
   },
   "dependencies": {
     "arc-preflight": "file:../..",
-    "viem": "^2.21.0"
+    "viem": "^2.56.8"
   },
   "devDependencies": {
-    "tsx": "^4.7.0"
+    "tsx": "^4.23.13"
   }
 }

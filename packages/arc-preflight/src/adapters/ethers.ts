@@ -1,182 +1,28 @@
 /**
  * adapters/ethers.ts
  *
- * Ethers v6 adapter for arc-preflight.
+ * Ethers v6 adapter for arc-preflight. Shares the exact same probe engine as
+ * the viem adapter via `RpcTransport`.
  *
  * Exports:
- *   - `preflightEthers()` — one-shot preflight check using an ethers JsonRpcProvider
+ *   - `preflightEthers()`     — one-shot preflight check using an ethers JsonRpcProvider
+ *   - `preflightManyEthers()` — one sender, many recipients
  *   - `withPreflightEthers()` — wraps an ethers Signer with automatic preflight guards
  *
  * Why different names from the Viem adapter?
  *   Both adapters live in the same package entry point. Using different names
- *   (`preflightEthers` / `withPreflightEthers`) avoids a naming collision with
- *   `preflight` / `withPreflight` from the Viem adapter. Callers can import both
- *   from 'arc-preflight' without conflict.
+ *   avoids a naming collision so callers can import both without conflict.
  */
 
 import type { JsonRpcProvider, Signer, TransactionRequest } from 'ethers'
-import type { PreflightResult, PreflightOptions } from '../types.js'
+import type { Address, Hex } from 'viem'
+import type { PreflightResult, PreflightOptions, PreflightManyResult } from '../types.js'
+import { probe, runPreflight } from '../probe.js'
+import { runPreflightMany, type PreflightManyOptions } from '../batch.js'
+import { transportFromEthers } from '../transport.js'
 import { PreflightError } from '../errors.js'
-import { USDC_TRANSFER_GAS_ESTIMATE } from '../constants.js'
 
-// ---------------------------------------------------------------------------
-// Revert reason extraction for ethers errors
-// ---------------------------------------------------------------------------
-
-function extractRevertReason(err: unknown): string {
-  if (err == null) return 'unknown error'
-
-  const e = err as Record<string, unknown>
-
-  // 0. Try ABI-decode Error(string) from data (0x08c379a0...)
-  const causeData: string | undefined =
-    (e.data as string | undefined) ??
-    (e.info as { error?: { data?: string } } | undefined)?.error?.data
-  if (causeData?.startsWith('0x08c379a0')) {
-    try {
-      const hex = causeData.slice(10)
-      const offsetHex = hex.slice(0, 64)
-      const offset = parseInt(offsetHex, 16) * 2
-      const lengthHex = hex.slice(offset, offset + 64)
-      const length = parseInt(lengthHex, 16)
-      const strHex = hex.slice(offset + 64, offset + 64 + length * 2)
-      const decoded = new TextDecoder().decode(
-        new Uint8Array(strHex.match(/.{2}/g)!.map(b => parseInt(b, 16)))
-      )
-      if (decoded) return decoded
-    } catch {
-      // fall through
-    }
-  }
-
-  // 1. ethers v6 surfaces the underlying node error in error.info.error.message
-  //    Arc returns: { code: -32603, message: "Blocked address" }
-  const infoMsg =
-    (e.info as { error?: { message?: string } } | undefined)?.error?.message
-  if (
-    infoMsg &&
-    typeof infoMsg === 'string' &&
-    !infoMsg.toLowerCase().includes('internal error') &&
-    !infoMsg.toLowerCase().includes('transaction failed')
-  ) {
-    return infoMsg.replace(/^revert:\s*/i, '').trim()
-  }
-
-  // 2. ethers shortMessage / message
-  const shortMessage = e.shortMessage as string | undefined
-  if (
-    shortMessage &&
-    !shortMessage.toLowerCase().includes('transaction failed') &&
-    !shortMessage.toLowerCase().includes('an internal error')
-  ) {
-    return shortMessage
-  }
-
-  // 3. Regex from stringified error
-  const errStr = String((e.message as string) || err)
-  const patterns = [
-    /Blocked address/i,
-    /runtime-transfer-check/i,
-    /reverted(?:\s+with\s+reason)?:\s*(.+?)(?:\.|$)/i,
-    /reason:\s*(.+?)(?:\.|$)/i,
-  ]
-  for (const pattern of patterns) {
-    const match = errStr.match(pattern)
-    if (match?.[1]) return match[1].trim()
-    if (match?.[0]) return match[0]
-  }
-
-  return shortMessage || 'execution reverted'
-}
-
-// ---------------------------------------------------------------------------
-// Core probe (ethers-flavoured)
-// ---------------------------------------------------------------------------
-
-async function probeEthers(
-  sender: string,
-  recipient: string,
-  provider: JsonRpcProvider,
-  options: PreflightOptions = {},
-): Promise<PreflightResult> {
-  const simulatedValue = options.simulatedValue ?? 1n
-
-  if (simulatedValue <= 0n) {
-    throw new RangeError(
-      'arc-preflight: simulatedValue must be > 0. ' +
-        'A zero-value send does not trigger Arc\'s blocklist check.',
-    )
-  }
-
-  // --- Step 0: Check the optional local cache ---
-  if (options.cache?.has(sender) || options.cache?.has(recipient)) {
-    return {
-      safe: false,
-      revertReason: 'Blocked address (cached)',
-      gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
-    }
-  }
-
-  // Build the stateOverride: give sender a virtual 10^24 wei balance
-  // so the probe can reach Arc's blocklist check without OutOfFunds
-  const stateOverride = {
-    [sender]: {
-      balance: '0x' + (10n ** 24n).toString(16), // 1,000,000 native USDC
-    },
-  }
-
-  // --- Step 1: Simulate via raw eth_call with stateOverride ---
-  try {
-    await provider.send('eth_call', [
-      {
-        from: sender,
-        to: recipient,
-        value: '0x' + simulatedValue.toString(16),
-      },
-      'latest',
-      stateOverride,
-    ])
-  } catch (err: unknown) {
-    // If stateOverride is rejected by an unsupported RPC, retry without it
-    const errStr = String(err).toLowerCase()
-    if (
-      errStr.includes('stateoverride') ||
-      errStr.includes('state override') ||
-      errStr.includes('unsupported') ||
-      errStr.includes('invalid argument') ||
-      errStr.includes('method not found')
-    ) {
-      try {
-        await provider.send('eth_call', [
-          {
-            from: sender,
-            to: recipient,
-            value: '0x' + simulatedValue.toString(16),
-          },
-          'latest',
-        ])
-      } catch (retryErr: unknown) {
-        return {
-          safe: false,
-          revertReason: extractRevertReason(retryErr),
-          gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
-        }
-      }
-    } else {
-      return {
-        safe: false,
-        revertReason: extractRevertReason(err),
-        gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
-      }
-    }
-  }
-
-  return {
-    safe: true,
-    revertReason: null,
-    gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
-  }
-}
+type EthersProviderLike = Pick<JsonRpcProvider, 'send'>
 
 // ---------------------------------------------------------------------------
 // preflightEthers() — standalone function
@@ -189,28 +35,34 @@ async function probeEthers(
  * @example
  * ```ts
  * import { JsonRpcProvider } from 'ethers'
- * import { preflightEthers } from 'arc-preflight'
+ * import { preflightEthers, ARC_MAINNET_RPC_URL } from 'arc-preflight'
  *
- * const provider = new JsonRpcProvider('https://rpc.testnet.arc.network')
+ * const provider = new JsonRpcProvider(ARC_MAINNET_RPC_URL)
  * const result = await preflightEthers('0xSender', '0xRecipient', provider)
- *
- * if (!result.safe) {
- *   console.error('Transfer blocked:', result.revertReason)
- * }
  * ```
- *
- * @param sender    - The address initiating the transfer
- * @param recipient - The destination address
- * @param provider  - An ethers v6 JsonRpcProvider connected to an Arc node
- * @param options   - Optional configuration (simulatedValue, etc.)
  */
 export async function preflightEthers(
   sender: string,
   recipient: string,
-  provider: JsonRpcProvider,
+  provider: EthersProviderLike,
   options?: PreflightOptions,
 ): Promise<PreflightResult> {
-  return probeEthers(sender, recipient, provider, options)
+  return probe(sender as Address, recipient as Address, transportFromEthers(provider), options)
+}
+
+/** Ethers flavour of `preflightMany()`. */
+export async function preflightManyEthers(
+  sender: string,
+  recipients: readonly string[],
+  provider: EthersProviderLike,
+  options?: PreflightManyOptions,
+): Promise<PreflightManyResult> {
+  return runPreflightMany(
+    sender as Address,
+    recipients as readonly Address[],
+    transportFromEthers(provider),
+    options,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -220,71 +72,64 @@ export async function preflightEthers(
 /**
  * Wraps an ethers v6 Signer with an automatic preflight guard.
  *
- * Every call to `sendTransaction` on the returned signer will first run a
- * preflight check. If the transfer would revert, a `PreflightError` is thrown
- * BEFORE any gas is spent.
- *
- * NOTE: Transactions with a `value` of `0` (or `undefined`) skip the preflight check, 
- * as zero-value transactions do not trigger Arc's runtime transfer blocklist.
+ * Every call to `sendTransaction` on the returned signer first runs the
+ * layered preflight against the transaction's native value AND any transfers
+ * encoded in its calldata. If the transfer would revert, a `PreflightError`
+ * is thrown BEFORE any gas is spent.
  *
  * @example
  * ```ts
- * import { JsonRpcProvider, Wallet } from 'ethers'
- * import { withPreflightEthers, PreflightError } from 'arc-preflight'
- *
- * const provider = new JsonRpcProvider('https://rpc.testnet.arc.network')
- * const signer = new Wallet('0xprivatekey', provider)
  * const guardedSigner = withPreflightEthers(signer, provider)
- *
  * try {
- *   const tx = await guardedSigner.sendTransaction({ to: recipient, value: amount })
+ *   await guardedSigner.sendTransaction({ to: recipient, value: amount })
  * } catch (err) {
- *   if (err instanceof PreflightError) {
- *     console.log('Blocked before submission:', err.revertReason)
- *   }
+ *   if (err instanceof PreflightError) console.log(err.reasonCode, err.revertReason)
  * }
  * ```
- *
- * @param signer   - The ethers v6 Signer to wrap
- * @param provider - A JsonRpcProvider used for the eth_call simulation
- * @param options  - Optional preflight configuration
  */
 export function withPreflightEthers<T extends Signer>(
   signer: T,
-  provider: JsonRpcProvider,
+  provider: EthersProviderLike,
   options?: PreflightOptions,
 ): T & { __preflight: true } {
+  const transport = transportFromEthers(provider)
+
   const guardedSigner = new Proxy(signer, {
     get(target, prop, receiver) {
+      if (prop === '__preflight') return true
       if (prop !== 'sendTransaction') {
         return Reflect.get(target, prop, receiver)
       }
 
       return async (tx: TransactionRequest) => {
-        // Determine sender address
-        const sender = await target.getAddress()
-        const recipient = tx.to as string | undefined
+        const sender = (await target.getAddress()) as Address
+        const recipient = (typeof tx.to === 'string' ? tx.to : undefined) as Address | undefined
+        const value = tx.value != null ? BigInt(tx.value.toString()) : 0n
+        const data = (typeof tx.data === 'string' && tx.data !== '0x' ? tx.data : undefined) as
+          | Hex
+          | undefined
 
-        // Only gate on transfers that have a recipient and non-zero value
-        const value =
-          tx.value != null ? BigInt(tx.value.toString()) : 0n
+        if (sender && recipient && (value > 0n || data)) {
+          let result: PreflightResult | null = null
+          try {
+            result = await runPreflight(
+              transport,
+              { from: sender, to: recipient, value, data },
+              { ...options, data },
+            )
+          } catch (err) {
+            if (!(err instanceof RangeError)) throw err
+          }
 
-        if (sender && recipient && value > 0n) {
-          const result = await probeEthers(sender, recipient, provider, {
-            simulatedValue: value,
-            ...options,
-          })
-
-          if (!result.safe) {
-            throw new PreflightError(result.revertReason ?? 'execution reverted')
+          if (result && !result.safe) {
+            throw new PreflightError(result.revertReason ?? 'execution reverted', result)
           }
         }
 
-        // Preflight passed — forward to signer
         return target.sendTransaction(tx)
       }
     },
   })
 
-  return Object.assign(guardedSigner, { __preflight: true as const })
+  return guardedSigner as T & { __preflight: true }
 }

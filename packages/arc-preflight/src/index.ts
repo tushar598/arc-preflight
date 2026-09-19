@@ -5,30 +5,55 @@
  *
  * @example
  * ```ts
- * import { preflight, withPreflight, PreflightError } from 'arc-preflight'
+ * import { preflight, preflightMany, withPreflight, PreflightError } from 'arc-preflight'
  * import { preflightEthers, withPreflightEthers } from 'arc-preflight'
- * import { checkSanctions } from 'arc-preflight'
- * import type { PreflightResult } from 'arc-preflight'
+ * import { checkSanctions, createBlocklistCache, decodeTransferIntents } from 'arc-preflight'
+ * import type { PreflightResult, PreflightReasonCode } from 'arc-preflight'
  * ```
  */
 
 // Viem adapter (primary)
-export { preflight, withPreflight } from './adapters/viem.js'
+export { preflight, preflightMany, withPreflight } from './adapters/viem.js'
 
 // Ethers v6 adapter
-export { preflightEthers, withPreflightEthers } from './adapters/ethers.js'
+export { preflightEthers, preflightManyEthers, withPreflightEthers } from './adapters/ethers.js'
+
+// Transport-level API (bring your own JSON-RPC)
+export { probe, runPreflight, simulateNativeSend, estimateNativeSendGas, isBlacklisted } from './probe.js'
+export { runPreflightMany } from './batch.js'
+export type { PreflightManyOptions } from './batch.js'
+export { httpTransport, transportFromViem, transportFromEthers } from './transport.js'
+
+// Calldata decoding
+export { decodeTransferIntents } from './calldata.js'
+export type { TxLike } from './calldata.js'
+
+// Revert helpers
+export { extractRevertReason, classifyRevert, isPrecompileAddress, decodeErrorString } from './revert.js'
 
 // Types
-export type { PreflightResult, PreflightOptions, BlocklistCache, Address } from './types.js'
+export type {
+  PreflightResult,
+  PreflightOptions,
+  PreflightReasonCode,
+  PreflightLayer,
+  PreflightManyResult,
+  BlocklistCache,
+  RpcTransport,
+  TransferIntent,
+  Address,
+  Hex,
+} from './types.js'
 
 // Errors
 export { PreflightError } from './errors.js'
 
-// Sanctions data (offline OFAC check)
-export { checkSanctions, sanctionsVersion, sanctionsCount } from './sanctions.js'
+// Sanctions data (offline OFAC SDN check)
+export { checkSanctions, sanctionsVersion, sanctionsCount, sanctionsScope } from './sanctions.js'
 
-// Cache (Local Event Cache)
+// Cache (local event cache with backfill)
 export { createBlocklistCache } from './cache.js'
+export type { BlocklistCacheOptions } from './cache.js'
 
 // Constants — exported for callers who want to reference Arc addresses
 export {
@@ -41,9 +66,19 @@ export {
   USDC_ADDRESS,
   MEMO_ADDRESS,
   MULTICALL3FROM_ADDRESS,
+  SYSTEM_EMITTER_ADDRESS,
+  NATIVE_COIN_AUTHORITY_PRECOMPILE_ADDRESS,
+  NATIVE_COIN_CONTROL_PRECOMPILE_ADDRESS,
+  CALLFROM_PRECOMPILE_ADDRESS,
+  ARC_PRECOMPILE_ADDRESSES,
   TESTNET_BLOCKLISTED_ADDRESS,
   MAINNET_DEMO_BLOCKED_ADDRESS,
+  ZERO_ADDRESS,
   MIN_BASE_FEE_WEI,
   USDC_TRANSFER_GAS_ESTIMATE,
   USDC_EVENTS_ABI,
+  USDC_BLACKLIST_ABI,
+  ERC20_TRANSFER_ABI,
+  MEMO_ABI,
+  MULTICALL3FROM_ABI,
 } from './constants.js'

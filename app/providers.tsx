@@ -1,68 +1,26 @@
 'use client'
 
 import { useState } from 'react'
-import {
-  RainbowKitProvider,
-  getDefaultConfig,
-  darkTheme,
-} from '@rainbow-me/rainbowkit'
+import { RainbowKitProvider, getDefaultConfig, darkTheme } from '@rainbow-me/rainbowkit'
 import '@rainbow-me/rainbowkit/styles.css'
 import { WagmiProvider } from 'wagmi'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { type Chain } from 'viem'
-import {
-  ARC_MAINNET_CHAIN_ID,
-  ARC_MAINNET_RPC_URL,
-  ARC_MAINNET_EXPLORER_URL,
-  ARC_TESTNET_CHAIN_ID,
-  ARC_TESTNET_RPC_URL,
-  ARC_TESTNET_EXPLORER_URL,
-} from 'arc-preflight'
-
-// Define the Arc Mainnet chain
-const arc: Chain = {
-  id: ARC_MAINNET_CHAIN_ID,
-  name: 'Arc',
-  nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
-  rpcUrls: {
-    default: { http: [ARC_MAINNET_RPC_URL] },
-  },
-  blockExplorers: {
-    default: { name: 'Arc Explorer', url: ARC_MAINNET_EXPLORER_URL },
-  },
-}
-
-// Define the Arc Testnet chain
-const arcTestnet: Chain = {
-  id: ARC_TESTNET_CHAIN_ID,
-  name: 'Arc Testnet',
-  nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
-  rpcUrls: {
-    default: { http: [ARC_TESTNET_RPC_URL] },
-  },
-  blockExplorers: {
-    default: { name: 'Arc Testnet Explorer', url: ARC_TESTNET_EXPLORER_URL },
-  },
-  testnet: true,
-}
+import { arcMainnet, arcTestnet } from '@/lib/chains'
 
 const config = getDefaultConfig({
-  appName: 'Arc Preflight Demo',
+  appName: 'arc-preflight',
   projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_ID || 'arc-preflight-demo',
-  chains: [arc, arcTestnet],
+  chains: [arcMainnet, arcTestnet],
   ssr: true,
 })
 
 function makeQueryClient() {
-  return new QueryClient({
-    defaultOptions: { queries: { staleTime: 60 * 1000 } },
-  })
+  return new QueryClient({ defaultOptions: { queries: { staleTime: 60 * 1000 } } })
 }
 
 let browserQueryClient: QueryClient | undefined
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  // Avoid shared singleton across SSR requests
   const [queryClient] = useState(() => {
     if (typeof window === 'undefined') return makeQueryClient()
     if (!browserQueryClient) browserQueryClient = makeQueryClient()
@@ -74,11 +32,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider
           theme={darkTheme({
-            accentColor: '#6366F1',
-            accentColorForeground: 'white',
-            borderRadius: 'medium',
+            accentColor: '#7c7aff',
+            accentColorForeground: '#0b0c17',
+            borderRadius: 'small',
             fontStack: 'system',
-            overlayBlur: 'small',
           })}
         >
           {children}

@@ -22,15 +22,15 @@
  *   Start arc-anvil with: arc-anvil --network arc --fork-url https://rpc.testnet.arc.network
  *
  * Sources:
- *   - https://docs.arc.network/arc/references/contract-addresses
- *   - https://docs.arc.network/arc/references/evm-differences
- *   - https://docs.arc.network/arc/references/gas-and-fees
+ *   - https://docs.arc.io/arc/references/contract-addresses
+ *   - https://docs.arc.io/arc/references/evm-differences
+ *   - https://docs.arc.io/arc/references/gas-and-fees
  */
 
-import { createPublicClient, http, parseUnits, encodeFunctionData, defineChain, decodeErrorResult, toHex } from 'viem'
+import { createPublicClient, http, parseUnits, encodeFunctionData, defineChain, decodeErrorResult } from 'viem'
 
 // ---------------------------------------------------------------------------
-// Arc chain definitions (from docs.arc.network)
+// Arc chain definitions (from docs.arc.io)
 // ---------------------------------------------------------------------------
 
 const arcTestnet = defineChain({
@@ -62,14 +62,14 @@ const arcAnvilFork = defineChain({
  * USDC ERC-20 interface contract address on Arc.
  * Note: Uses 6 decimals (ERC-20 interface).
  *       The native USDC balance uses 18 decimals.
- * Source: https://docs.arc.network/arc/references/contract-addresses
+ * Source: https://docs.arc.io/arc/references/contract-addresses
  */
 const USDC_ADDRESS = '0x3600000000000000000000000000000000000000' as const
 
 /**
  * Known blocklisted test address on Arc Testnet.
  * Derived from mnemonic: "test test...junk" at index 1.
- * Source: https://docs.arc.network/arc/references/contract-addresses
+ * Source: https://docs.arc.io/arc/references/contract-addresses
  */
 const BLOCKLISTED_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8' as const
 
@@ -81,7 +81,7 @@ const SENDER_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as const
 
 /**
  * Minimum base fee on Arc: 20 Gwei.
- * Source: https://docs.arc.network/arc/references/evm-differences
+ * Source: https://docs.arc.io/arc/references/evm-differences
  */
 const MIN_BASE_FEE_GWEI = BigInt(20)
 const GWEI = BigInt(1_000_000_000)
@@ -140,7 +140,6 @@ async function main() {
   console.log('Step 1: Simulating transfer to blocklisted address via eth_call...')
   let reverted = false
   let revertReason = ''
-  let rawError: unknown = null
 
   try {
     await client.call({
@@ -152,7 +151,6 @@ async function main() {
     console.log('    Hint: Make sure you are using arc-anvil (--network arc) or Arc Testnet.')
   } catch (err: unknown) {
     reverted = true
-    rawError = err
 
     // Attempt to extract the revert reason from the error.
     // Arc encodes revert reasons as standard Error(string) ABI: 0x08c379a0...
@@ -196,7 +194,6 @@ async function main() {
   // 3. Try to estimate gas for a non-blocklisted transfer (to understand cost saved)
   console.log('\nStep 2: Estimating gas for a normal (non-blocklisted) transfer...')
   let gasEstimate = BigInt(0)
-  const SAFE_RECEIVER = '0x1111111111111111111111111111111111111111' as const
 
   // Use a fixed well-known gas cost for a standard ERC-20 transfer.
   // USDC on Arc uses ~34,000 gas for an ERC-20 transfer (slightly above the base 21k

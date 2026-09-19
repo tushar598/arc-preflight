@@ -1,6 +1,7 @@
 {
   "version": "2026-09-18",
   "source": "OFAC SDN (Specially Designated Nationals List)",
+  "scope": "OFAC SDN Digital Currency Address - ETH only",
   "description": "Ethereum wallet addresses from the US OFAC SDN list. Generated automatically. Do not edit manually.",
   "count": 120,
   "addresses": [

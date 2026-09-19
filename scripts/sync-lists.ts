@@ -8,7 +8,9 @@
  *   npx tsx scripts/sync-lists.ts
  *
  * Run this manually or via the GitHub Action (.github/workflows/sync-sanctions.yml)
- * which triggers on PR merge.
+ * which runs weekly (Monday 06:00 UTC), on PR merge, and on manual dispatch.
+ *
+ * Scope: OFAC SDN "Digital Currency Address - ETH" entries ONLY. No EU / UN lists.
  *
  * Source: https://sanctionslistservice.ofac.treas.gov (OFAC Sanctions List Service)
  */
@@ -137,6 +139,7 @@ async function main() {
   const output = {
     version,
     source: 'OFAC SDN (Specially Designated Nationals List)',
+    scope: 'OFAC SDN Digital Currency Address - ETH only',
     description:
       'Ethereum wallet addresses from the US OFAC SDN list. ' +
       'Generated automatically. Do not edit manually.',
