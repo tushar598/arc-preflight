@@ -6,8 +6,9 @@ import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { 
   preflight, 
   MAINNET_DEMO_BLOCKED_ADDRESS,
-  TESTNET_BLOCKLISTED_ADDRESS 
+  MIN_BASE_FEE_WEI
 } from 'arc-preflight'
+import { type PublicClient, isAddress, formatEther } from 'viem'
 
 export function PreflightDemo() {
   const { address } = useAccount()
@@ -27,24 +28,40 @@ export function PreflightDemo() {
     setLoading(true)
     setResult(null)
 
+    if (!isAddress(recipient)) {
+      setResult({
+        safe: false,
+        reason: 'Invalid Ethereum address format'
+      })
+      setLoading(false)
+      return
+    }
+
     try {
       // Amount in Wei (dummy conversion, assuming 18 decimals and simplistic integer input for demo)
       const simulatedValue = BigInt(amount) * (BigInt(10) ** BigInt(18))
 
       // Run preflight check
-      const check = await preflight(address, recipient as `0x${string}`, publicClient as any, {
+      const check = await preflight(address, recipient as `0x${string}`, publicClient as unknown as PublicClient, {
         simulatedValue
       })
+
+      let gasSaved: string | undefined
+      if (!check.safe && check.gasEstimate) {
+        const costInWei = check.gasEstimate * BigInt(MIN_BASE_FEE_WEI)
+        // Format to standard decimal representation
+        gasSaved = formatEther(costInWei)
+      }
 
       setResult({
         safe: check.safe,
         reason: check.revertReason,
-        gasSaved: check.safe ? undefined : check.gasEstimate.toString()
+        gasSaved
       })
-    } catch (err: any) {
+    } catch (err: unknown) {
       setResult({
         safe: false,
-        reason: err.message
+        reason: err instanceof Error ? err.message : String(err)
       })
     } finally {
       setLoading(false)
@@ -136,7 +153,7 @@ export function PreflightDemo() {
               {!result.safe && result.gasSaved && (
                 <div className="mt-4 p-4 bg-white bg-opacity-60 rounded-xl border border-red-100 flex items-center justify-between">
                   <span className="font-semibold text-red-900">Estimated Gas Saved</span>
-                  <span className="font-mono text-red-700 font-bold">{result.gasSaved} wei</span>
+                  <span className="font-mono text-red-700 font-bold">{result.gasSaved} USDC (Native)</span>
                 </div>
               )}
             </div>

@@ -73,6 +73,9 @@ export async function preflight(
  * preflight check. If the transfer would revert, a `PreflightError` is thrown
  * BEFORE any gas is spent.
  *
+ * NOTE: Transactions with a `value` of `0` (or `undefined`) skip the preflight check, 
+ * as zero-value transactions do not trigger Arc's runtime transfer blocklist.
+ *
  * @example
  * ```ts
  * import { createWalletClient, createPublicClient, http } from 'viem'

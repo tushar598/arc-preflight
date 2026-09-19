@@ -16,10 +16,10 @@ describe('Local Blocklist Cache', () => {
     const client = createPublicClient({ transport: http(TEST_RPC) })
     
     // 1. Mock watchContractEvent to capture the callback
-    let eventCallback: ((logs: any[]) => void) | undefined
+    let eventCallback: ((logs: unknown[]) => void) | undefined
     const watchMock = vi.spyOn(client, 'watchContractEvent').mockImplementation(
-      (args: any) => {
-        eventCallback = args.onLogs
+      (args: unknown) => {
+        eventCallback = (args as { onLogs: (logs: unknown[]) => void }).onLogs
         return () => {} // return mock unwatch function
       }
     )
@@ -50,7 +50,7 @@ describe('Local Blocklist Cache', () => {
     const result = await preflight(SENDER, BLOCKED, client, { cache })
     expect(result.safe).toBe(false)
     expect(result.revertReason).toBe('Blocked address (cached)')
-    expect(result.gasEstimate).toBe(0n)
+    expect(result.gasEstimate).toBe(34000n)
     expect(callMock).not.toHaveBeenCalled()
 
     // 5. Simulate UnBlacklisted event

@@ -59,7 +59,9 @@ function extractRevertReason(err: unknown): string {
       const lengthHex = hex.slice(offset, offset + 64)
       const length = parseInt(lengthHex, 16)
       const strHex = hex.slice(offset + 64, offset + 64 + length * 2)
-      const decoded = Buffer.from(strHex, 'hex').toString('utf8')
+      const decoded = new TextDecoder().decode(
+        new Uint8Array(strHex.match(/.{2}/g)!.map(b => parseInt(b, 16)))
+      )
       if (decoded) return decoded
     } catch {
       // Manual decode failed — fall through
@@ -144,11 +146,11 @@ export async function probe(
   }
 
   // --- Step 0: Check the optional local cache ---
-  if (options.cache?.has(recipient)) {
+  if (options.cache?.has(sender) || options.cache?.has(recipient)) {
     return {
       safe: false,
       revertReason: 'Blocked address (cached)',
-      gasEstimate: 0n, // Fast path bypasses gas estimation
+      gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
     }
   }
 
@@ -199,24 +201,9 @@ export async function probe(
     }
   }
 
-  // --- Step 2: Transfer looks safe — estimate gas for the real call ---
-  let gasEstimate = USDC_TRANSFER_GAS_ESTIMATE
-
-  try {
-    gasEstimate = await client.estimateGas({
-      account: sender,
-      to: recipient,
-      value: simulatedValue,
-    })
-  } catch {
-    // estimateGas failed (e.g., sender has no balance) — use documented fallback
-    // This doesn't affect the safety determination; the call itself succeeded.
-    gasEstimate = USDC_TRANSFER_GAS_ESTIMATE
-  }
-
   return {
     safe: true,
     revertReason: null,
-    gasEstimate,
+    gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
   }
 }

@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Arc Preflight
 
-## Getting Started
+> **Stop paying gas for blocklisted transfers on Arc.**
 
-First, run the development server:
+A zero-infrastructure SDK and interactive demo for the Arc Network. Built for the **Arc Microgrants (Circle × DoraHacks)**.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## What is this?
+
+Arc enforces a **runtime transfer blocklist** directly in the EVM. If you send USDC to an OFAC-sanctioned address (or an address blocked by Arc for malicious activity), the transaction reverts. You lose the gas fee, and autonomous agents get stuck in retry loops.
+
+`arc-preflight` solves this. It's a lightweight NPM package that simulates native USDC transfers via `eth_call` (with `stateOverride`) *before* submission. If the transfer hits the blocklist, the simulation reverts, catching the error **for free**.
+
+- **Zero-infrastructure**: No databases, no API keys.
+- **Offline Sanctions Check**: Includes a bundled OFAC SDN list, updated automatically via GitHub Actions.
+- **Developer Friendly**: Drop-in middleware for Viem and Ethers v6.
+
+## Structure
+
+This repository is a monorepo containing:
+
+1. **`packages/arc-preflight/`**: The core SDK. Published to npm as `arc-preflight`. (See its [README](packages/arc-preflight/README.md) for usage).
+2. **`app/`**: A Next.js (App Router) demo application that integrates the SDK to showcase gas savings visually.
+
+## Running the Demo Locally
+
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+2. Start the development server:
+   ```bash
+   npm run dev
+   ```
+
+3. Open [http://localhost:3000](http://localhost:3000). Connect a wallet (Arc Mainnet or Testnet) and try simulating a transfer to the provided blocklisted test addresses.
+
+## SDK Usage (Viem)
+
+```ts
+import { createWalletClient, createPublicClient, http } from 'viem'
+import { withPreflight, PreflightError } from 'arc-preflight'
+
+const publicClient = createPublicClient({ transport: http('https://rpc.mainnet.arc.io') })
+const walletClient = createWalletClient({ /* ... */ })
+
+// Wrap your wallet with the preflight guard
+const guardedWallet = withPreflight(walletClient, publicClient)
+
+try {
+  // Throws BEFORE gas is spent if the recipient is blocklisted
+  const hash = await guardedWallet.sendTransaction({
+    to: '0xRecipientAddress',
+    value: 1000000n, // amount in wei
+  })
+} catch (err) {
+  if (err instanceof PreflightError) {
+    console.error('Transfer blocked:', err.revertReason)
+  }
+}
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## License
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT

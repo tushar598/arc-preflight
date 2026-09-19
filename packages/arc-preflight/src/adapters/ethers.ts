@@ -28,6 +28,27 @@ function extractRevertReason(err: unknown): string {
 
   const e = err as Record<string, unknown>
 
+  // 0. Try ABI-decode Error(string) from data (0x08c379a0...)
+  const causeData: string | undefined =
+    (e.data as string | undefined) ??
+    (e.info as { error?: { data?: string } } | undefined)?.error?.data
+  if (causeData?.startsWith('0x08c379a0')) {
+    try {
+      const hex = causeData.slice(10)
+      const offsetHex = hex.slice(0, 64)
+      const offset = parseInt(offsetHex, 16) * 2
+      const lengthHex = hex.slice(offset, offset + 64)
+      const length = parseInt(lengthHex, 16)
+      const strHex = hex.slice(offset + 64, offset + 64 + length * 2)
+      const decoded = new TextDecoder().decode(
+        new Uint8Array(strHex.match(/.{2}/g)!.map(b => parseInt(b, 16)))
+      )
+      if (decoded) return decoded
+    } catch {
+      // fall through
+    }
+  }
+
   // 1. ethers v6 surfaces the underlying node error in error.info.error.message
   //    Arc returns: { code: -32603, message: "Blocked address" }
   const infoMsg =
@@ -88,11 +109,11 @@ async function probeEthers(
   }
 
   // --- Step 0: Check the optional local cache ---
-  if (options.cache?.has(recipient)) {
+  if (options.cache?.has(sender) || options.cache?.has(recipient)) {
     return {
       safe: false,
       revertReason: 'Blocked address (cached)',
-      gasEstimate: 0n, // Fast path bypasses gas estimation
+      gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
     }
   }
 
@@ -150,25 +171,10 @@ async function probeEthers(
     }
   }
 
-  // --- Step 2: Transfer is safe — estimate gas ---
-  let gasEstimate = USDC_TRANSFER_GAS_ESTIMATE
-
-  try {
-    const estimate = await provider.estimateGas({
-      from: sender,
-      to: recipient,
-      value: simulatedValue,
-    })
-    gasEstimate = BigInt(estimate.toString())
-  } catch {
-    // Sender has no real balance — use documented fallback
-    gasEstimate = USDC_TRANSFER_GAS_ESTIMATE
-  }
-
   return {
     safe: true,
     revertReason: null,
-    gasEstimate,
+    gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
   }
 }
 
@@ -217,6 +223,9 @@ export async function preflightEthers(
  * Every call to `sendTransaction` on the returned signer will first run a
  * preflight check. If the transfer would revert, a `PreflightError` is thrown
  * BEFORE any gas is spent.
+ *
+ * NOTE: Transactions with a `value` of `0` (or `undefined`) skip the preflight check, 
+ * as zero-value transactions do not trigger Arc's runtime transfer blocklist.
  *
  * @example
  * ```ts

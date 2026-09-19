@@ -28,7 +28,7 @@ export function createBlocklistCache(client: PublicClient): BlocklistCache {
         onLogs: logs => {
           for (const log of logs) {
             const eventName = log.eventName
-            const account = (log.args as any)._account?.toLowerCase()
+            const account = (log.args as { _account?: string })?._account?.toLowerCase()
             if (!account) continue
 
             if (eventName === 'Blacklisted') {
