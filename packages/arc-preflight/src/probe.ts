@@ -44,14 +44,10 @@ import { USDC_TRANSFER_GAS_ESTIMATE } from './constants.js'
 function extractRevertReason(err: unknown): string {
   if (err == null) return 'unknown error'
 
-  // 1. Viem's shortMessage is the cleanest source
-  const shortMessage = (err as { shortMessage?: string }).shortMessage
-  if (shortMessage) return shortMessage
-
-  // 2. Try to ABI-decode from cause.data (Error(string) = 0x08c379a0...)
-  const causeData: string | undefined = (
-    err as { cause?: { data?: string } }
-  )?.cause?.data
+  // 1. Try to ABI-decode from cause.data (Error(string) = 0x08c379a0...)
+  const causeData: string | undefined =
+    (err as { cause?: { data?: string } })?.cause?.data ??
+    (err as { data?: string })?.data
 
   if (causeData?.startsWith('0x08c379a0')) {
     // Error(string) ABI encoding: 4-byte selector + 32-byte offset + 32-byte length + string
@@ -70,23 +66,48 @@ function extractRevertReason(err: unknown): string {
     }
   }
 
+  // 2. Node-level details (e.g. Arc node returns "Blocked address" in details)
+  const details =
+    (err as { details?: string })?.details ??
+    (err as { cause?: { details?: string } })?.cause?.details
+  if (details && typeof details === 'string') {
+    const cleaned = details.replace(/^revert:\s*/i, '').trim()
+    if (
+      cleaned &&
+      !cleaned.toLowerCase().includes('transaction creation failed') &&
+      !cleaned.toLowerCase().includes('an internal error was received')
+    ) {
+      return cleaned
+    }
+  }
+
   // 3. Regex extraction from the full error message string
-  const errStr = String(err)
+  const errStr = String((err as { message?: string })?.message || err)
   const patterns = [
-    // "reverted with reason: <reason>"
+    /Blocked address/i,
+    /runtime-transfer-check/i,
     /reverted(?:\s+with\s+reason)?:\s*(.+?)(?:\.|$)/i,
-    // "Revert: <reason>"
     /Revert:\s*(.+?)(?:\.|$)/i,
-    // "reason: <reason>"
     /reason:\s*(.+?)(?:\.|$)/i,
   ]
   for (const pattern of patterns) {
     const match = errStr.match(pattern)
     if (match?.[1]) return match[1].trim()
+    if (match?.[0]) return match[0]
   }
 
-  // 4. Generic fallback
-  return 'execution reverted'
+  // 4. Viem's shortMessage (if not a generic wrapper string)
+  const shortMessage = (err as { shortMessage?: string }).shortMessage
+  if (
+    shortMessage &&
+    !shortMessage.toLowerCase().includes('transaction creation failed') &&
+    !shortMessage.toLowerCase().includes('an internal error was received')
+  ) {
+    return shortMessage
+  }
+
+  // 5. Generic fallback
+  return shortMessage || 'execution reverted'
 }
 
 // ---------------------------------------------------------------------------
@@ -124,23 +145,48 @@ export async function probe(
 
   // --- Step 1: Simulate a native USDC send via eth_call ---
   // Arc's runtime-transfer-check fires on any native value transfer to/from
-  // a blocklisted address. Simulating with value: 1n (1 wei) is sufficient
-  // to trigger the check without requiring any real balance.
+  // a blocklisted address. We provide virtual balance via stateOverride so
+  // simulation can check recipient validity without being stopped by OutOfFunds.
   try {
     await client.call({
       account: sender,
       to: recipient,
       value: simulatedValue,
+      stateOverride: [
+        {
+          address: sender,
+          balance: 10n ** 24n, // 1,000,000 native USDC (18 decimals)
+        },
+      ],
     })
   } catch (err: unknown) {
-    // The call reverted — extract the reason and return unsafe result
-    const revertReason = extractRevertReason(err)
-    return {
-      safe: false,
-      revertReason,
-      // For an unsafe transfer, return the documented gas constant as an
-      // estimate of what would have been wasted (gas is consumed even on revert)
-      gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
+    // If stateOverride is rejected by an RPC that does not support it,
+    // retry without stateOverride
+    const errStr = String(err).toLowerCase()
+    if (
+      errStr.includes('stateoverride') ||
+      errStr.includes('state override') ||
+      errStr.includes('method not found')
+    ) {
+      try {
+        await client.call({
+          account: sender,
+          to: recipient,
+          value: simulatedValue,
+        })
+      } catch (retryErr: unknown) {
+        return {
+          safe: false,
+          revertReason: extractRevertReason(retryErr),
+          gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
+        }
+      }
+    } else {
+      return {
+        safe: false,
+        revertReason: extractRevertReason(err),
+        gasEstimate: USDC_TRANSFER_GAS_ESTIMATE,
+      }
     }
   }
 
