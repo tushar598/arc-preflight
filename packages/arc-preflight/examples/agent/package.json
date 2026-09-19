@@ -1,0 +1,15 @@
+{
+  "name": "arc-preflight-agent-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx run.ts"
+  },
+  "dependencies": {
+    "arc-preflight": "file:../..",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0"
+  }
+}

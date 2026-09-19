@@ -129,6 +129,9 @@ declare function preflight(sender: Address, recipient: Address, client: PublicCl
  * preflight check. If the transfer would revert, a `PreflightError` is thrown
  * BEFORE any gas is spent.
  *
+ * NOTE: Transactions with a `value` of `0` (or `undefined`) skip the preflight check,
+ * as zero-value transactions do not trigger Arc's runtime transfer blocklist.
+ *
  * @example
  * ```ts
  * import { createWalletClient, createPublicClient, http } from 'viem'
@@ -203,6 +206,9 @@ declare function preflightEthers(sender: string, recipient: string, provider: Js
  * Every call to `sendTransaction` on the returned signer will first run a
  * preflight check. If the transfer would revert, a `PreflightError` is thrown
  * BEFORE any gas is spent.
+ *
+ * NOTE: Transactions with a `value` of `0` (or `undefined`) skip the preflight check,
+ * as zero-value transactions do not trigger Arc's runtime transfer blocklist.
  *
  * @example
  * ```ts

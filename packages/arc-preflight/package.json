@@ -10,6 +10,14 @@
     "viem",
     "web3"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tusharsinghchouhan/arc-preflight.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tusharsinghchouhan/arc-preflight/issues"
+  },
+  "homepage": "https://github.com/tusharsinghchouhan/arc-preflight#readme",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.cjs",

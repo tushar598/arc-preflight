@@ -85,7 +85,9 @@ function extractRevertReason(err) {
       const lengthHex = hex.slice(offset, offset + 64);
       const length = parseInt(lengthHex, 16);
       const strHex = hex.slice(offset + 64, offset + 64 + length * 2);
-      const decoded = Buffer.from(strHex, "hex").toString("utf8");
+      const decoded = new TextDecoder().decode(
+        new Uint8Array(strHex.match(/.{2}/g).map((b) => parseInt(b, 16)))
+      );
       if (decoded) return decoded;
     } catch {
     }
@@ -123,12 +125,11 @@ async function probe(sender, recipient, client, options = {}) {
       "arc-preflight: simulatedValue must be > 0. A zero-value send does not trigger Arc's blocklist check."
     );
   }
-  if (options.cache?.has(recipient)) {
+  if (options.cache?.has(sender) || options.cache?.has(recipient)) {
     return {
       safe: false,
       revertReason: "Blocked address (cached)",
-      gasEstimate: 0n
-      // Fast path bypasses gas estimation
+      gasEstimate: USDC_TRANSFER_GAS_ESTIMATE
     };
   }
   try {
@@ -168,20 +169,10 @@ async function probe(sender, recipient, client, options = {}) {
       };
     }
   }
-  let gasEstimate = USDC_TRANSFER_GAS_ESTIMATE;
-  try {
-    gasEstimate = await client.estimateGas({
-      account: sender,
-      to: recipient,
-      value: simulatedValue
-    });
-  } catch {
-    gasEstimate = USDC_TRANSFER_GAS_ESTIMATE;
-  }
   return {
     safe: true,
     revertReason: null,
-    gasEstimate
+    gasEstimate: USDC_TRANSFER_GAS_ESTIMATE
   };
 }
 
@@ -234,6 +225,22 @@ function withPreflight(walletClient, publicClient, options) {
 function extractRevertReason2(err) {
   if (err == null) return "unknown error";
   const e = err;
+  const causeData = e.data ?? e.info?.error?.data;
+  if (causeData?.startsWith("0x08c379a0")) {
+    try {
+      const hex = causeData.slice(10);
+      const offsetHex = hex.slice(0, 64);
+      const offset = parseInt(offsetHex, 16) * 2;
+      const lengthHex = hex.slice(offset, offset + 64);
+      const length = parseInt(lengthHex, 16);
+      const strHex = hex.slice(offset + 64, offset + 64 + length * 2);
+      const decoded = new TextDecoder().decode(
+        new Uint8Array(strHex.match(/.{2}/g).map((b) => parseInt(b, 16)))
+      );
+      if (decoded) return decoded;
+    } catch {
+    }
+  }
   const infoMsg = e.info?.error?.message;
   if (infoMsg && typeof infoMsg === "string" && !infoMsg.toLowerCase().includes("internal error") && !infoMsg.toLowerCase().includes("transaction failed")) {
     return infoMsg.replace(/^revert:\s*/i, "").trim();
@@ -263,12 +270,11 @@ async function probeEthers(sender, recipient, provider, options = {}) {
       "arc-preflight: simulatedValue must be > 0. A zero-value send does not trigger Arc's blocklist check."
     );
   }
-  if (options.cache?.has(recipient)) {
+  if (options.cache?.has(sender) || options.cache?.has(recipient)) {
     return {
       safe: false,
       revertReason: "Blocked address (cached)",
-      gasEstimate: 0n
-      // Fast path bypasses gas estimation
+      gasEstimate: USDC_TRANSFER_GAS_ESTIMATE
     };
   }
   const stateOverride = {
@@ -314,21 +320,10 @@ async function probeEthers(sender, recipient, provider, options = {}) {
       };
     }
   }
-  let gasEstimate = USDC_TRANSFER_GAS_ESTIMATE;
-  try {
-    const estimate = await provider.estimateGas({
-      from: sender,
-      to: recipient,
-      value: simulatedValue
-    });
-    gasEstimate = BigInt(estimate.toString());
-  } catch {
-    gasEstimate = USDC_TRANSFER_GAS_ESTIMATE;
-  }
   return {
     safe: true,
     revertReason: null,
-    gasEstimate
+    gasEstimate: USDC_TRANSFER_GAS_ESTIMATE
   };
 }
 async function preflightEthers(sender, recipient, provider, options) {
@@ -522,7 +517,7 @@ function createBlocklistCache(client) {
         onLogs: (logs) => {
           for (const log of logs) {
             const eventName = log.eventName;
-            const account = log.args._account?.toLowerCase();
+            const account = log.args?._account?.toLowerCase();
             if (!account) continue;
             if (eventName === "Blacklisted") {
               blocklist.add(account);

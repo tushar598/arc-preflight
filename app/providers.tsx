@@ -4,7 +4,7 @@ import { useState } from 'react'
 import {
   RainbowKitProvider,
   getDefaultConfig,
-  lightTheme,
+  darkTheme,
 } from '@rainbow-me/rainbowkit'
 import '@rainbow-me/rainbowkit/styles.css'
 import { WagmiProvider } from 'wagmi'
@@ -73,8 +73,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider
-          theme={lightTheme({
-            accentColor: '#0f172a',
+          theme={darkTheme({
+            accentColor: '#6366F1',
             accentColorForeground: 'white',
             borderRadius: 'medium',
             fontStack: 'system',
