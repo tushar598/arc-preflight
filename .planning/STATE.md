@@ -1,7 +1,7 @@
 # Project State
 
-- **Current Status:** Phase 4 Complete
+- **Current Status:** Phase 5 Complete
 - **Active Phase:** None
-- **Last Completed:** Phase 4 — Local Blocklist Cache
-- **Next Steps:** Phase 5 — Demo Page Deployment via `/gsd-discuss-phase 5`
+- **Last Completed:** Phase 5 — Demo Page Deployment
+- **Next Steps:** Phase 6 — Agent Middleware via `/gsd-discuss-phase 6`
 
