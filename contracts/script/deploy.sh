@@ -29,7 +29,7 @@ forge build --quiet
 FACTORY=0x4e59b44847b379578588920cA78FbF26c0B4956C
 SALT=$(cast keccak "arc-preflight.PreflightPayout.v1")
 INIT=$(jq -r .bytecode.object out/PreflightPayout.sol/PreflightPayout.json)
-ADDR=$(cast create2 --deployer "$FACTORY" --salt "$SALT" --init-code "$INIT" | awk '{print $NF}')
+ADDR=$(cast create2 --deployer "$FACTORY" --salt "$SALT" --init-code "$INIT" | grep -oE '\b0x[0-9a-fA-F]{40}\b' | head -1)
 
 echo "network   $NET"
 echo "address   $ADDR"
