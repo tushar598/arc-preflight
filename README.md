@@ -64,6 +64,21 @@ Layers 1–3 can only *prove* a blocklist hit and short-circuit when they do. La
 
 **Calldata is decoded.** ERC-20 `transfer` / `transferFrom` / EIP-3009 authorizations, `Memo.memo(...)` wrappers and every `Multicall3From` aggregate variant are unwrapped, and each inner sender→recipient pair goes through the same four layers. A `value: 0` transaction that moves USDC is still guarded. Memo and Multicall3From route through the CallFrom precompile, so inner transfers are attributed to the original sender.
 
+## On-chain: PreflightPayout
+
+The SDK stops a single bad send before it is broadcast. Batches need more than that. One blocklisted payee in a normal multicall reverts the whole payroll, and you pay gas for all of it. [`PreflightPayout`](contracts/) is arc-preflight's own contract at **`0xDcCa5d6603Eb63241763665DB4c95f8c8d51BcDA`** (the same address on mainnet and testnet, via CREATE2). It runs the same checks on-chain, pays every payee Arc accepts, and refunds the rest to the payer in the same transaction, with a `Skipped` event for each one.
+
+```ts
+import { planPayout, parsePayoutLogs } from 'arc-preflight'
+
+const plan = await planPayout(payer, [{ to: alice, amount }, { to: bob, amount }], publicClient)
+plan.skip                 // [{ to: bob, reasonCode: 'BLOCKLIST', layer: 'isBlacklisted', … }]: predicted off-chain
+const hash = await wallet.sendTransaction(plan.tx!)          // payMany(…) on the contract
+parsePayoutLogs(receipt.logs)                                // { paid, skipped, refundedValue }: what happened on-chain
+```
+
+By default the plan leaves the payees it expects to fail out of the transaction. Pass `{ includeSkipped: true }` to send them anyway: the contract refunds them and writes the screening to the chain. `withPreflight` recognises `payMany` and simulates the real call, so a batch containing a blocked payee goes through, while a batch *from* a blocked payer is stopped. The contract also catches anything that changes between the plan and inclusion, as well as the one trap Arc itself cannot revert: a value send to an Ethereum precompile such as `0x01` succeeds on Arc, and the USDC is gone.
+
 ## Exports
 
 | Export | Purpose |
@@ -74,11 +89,14 @@ Layers 1–3 can only *prove* a blocklist hit and short-circuit when they do. La
 | `preflightEthers` / `preflightManyEthers` / `withPreflightEthers` | Same for ethers v6 (`JsonRpcProvider` / `Signer`) |
 | `checkSanctions(addr)`, `sanctionsVersion`, `sanctionsCount`, `sanctionsScope` | Offline OFAC SDN lookup |
 | `createBlocklistCache(publicClient, { lookbackBlocks?, fromBlock?, chunkSize? })` | Event cache with backfill; `has()`, `size`, `startedAt`, `start()`, `stop()` |
+| `planPayout(payer, payees[], publicClient, { ref?, includeSkipped? })` | Screen payees and build a `PreflightPayout.payMany` tx → `{ pay, skip, payValue, skipValue, tx }` |
+| `parsePayoutLogs(logs)` / `readPayoutStats(publicClient)` | Decode a payout receipt; the contract's lifetime counters (`null` if not deployed) |
+| `planPayoutEthers` / `readPayoutStatsEthers` / `runPlanPayout` / `fetchPayoutStats` | Ethers and transport-level versions |
 | `decodeTransferIntents(tx)` | The calldata decoder on its own |
 | `runPreflight`, `probe`, `httpTransport`, `transportFromViem`, `transportFromEthers` | Engine + transports for any JSON-RPC client |
 | `extractRevertReason`, `classifyRevert`, `isPrecompileAddress` | Revert helpers |
 | `PreflightError` | `.revertReason`, `.reasonCode`, `.layer`, `.result` |
-| Constants | Chain IDs, public RPC/explorer URLs, `USDC_ADDRESS`, `MEMO_ADDRESS`, `MULTICALL3FROM_ADDRESS`, `SYSTEM_EMITTER_ADDRESS`, `CALLFROM_PRECOMPILE_ADDRESS`, `NATIVE_COIN_CONTROL_PRECOMPILE_ADDRESS`, `TESTNET_BLOCKLISTED_ADDRESS`, `MAINNET_DEMO_BLOCKED_ADDRESS`, `MIN_BASE_FEE_WEI`, ABIs |
+| Constants | Chain IDs, public RPC/explorer URLs, `USDC_ADDRESS`, `MEMO_ADDRESS`, `MULTICALL3FROM_ADDRESS`, `PREFLIGHT_PAYOUT_ADDRESS` + `PREFLIGHT_PAYOUT_ABI`, `SYSTEM_EMITTER_ADDRESS`, `CALLFROM_PRECOMPILE_ADDRESS`, `NATIVE_COIN_CONTROL_PRECOMPILE_ADDRESS`, `TESTNET_BLOCKLISTED_ADDRESS`, `MAINNET_DEMO_BLOCKED_ADDRESS`, `MIN_BASE_FEE_WEI`, ABIs |
 
 `PreflightResult`:
 
@@ -115,6 +133,7 @@ Full list in [docs/limitations.md](docs/limitations.md). The short version:
 
 ```
 packages/arc-preflight/   the SDK (npm: arc-preflight) — src/, tests/unit (offline), tests/live (Arc Testnet, LIVE_RPC=1)
+contracts/                PreflightPayout.sol (Foundry) — batch payouts that skip and refund blocked payees
 app/ components/ lib/     the Next.js demo, deployed against Arc mainnet public RPC; /demo deep link
 scripts/sync-lists.ts     OFAC SDN → data/sanctions.json (weekly GitHub Action)
 docs/                     data-sources.md, limitations.md, submission.md
@@ -126,7 +145,8 @@ Local:
 
 ```bash
 npm ci               # .npmrc sets legacy-peer-deps for the RainbowKit/wagmi pair
-npm run sdk:test     # 67 offline unit tests
+npm run sdk:test     # 79 offline unit tests
+npm run contracts:test   # 12 Foundry tests for PreflightPayout (needs foundry)
 npm run dev          # builds the SDK, then next dev → http://localhost:3000 (/demo for the blocked path)
 ```
 

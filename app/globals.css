@@ -198,6 +198,14 @@ code, .mono { font-family: var(--font-mono); font-variant-ligatures: none; }
 .result-line a { color: var(--accent-2); text-decoration: underline; text-underline-offset: 3px; }
 .result-line .mono { color: var(--fg); font-size: 13px; word-break: break-all; }
 
+/* ─── Payout ─── */
+.check { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; cursor: pointer; }
+.check input { margin-top: 3px; accent-color: var(--accent); }
+.ledger.payees { margin-top: 16px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.ledger.payees .name .mono { color: var(--fg); font-size: 13px; }
+.ledger.payees .status { white-space: nowrap; }
+a.link { color: var(--accent-2); text-decoration: underline; text-underline-offset: 3px; }
+
 /* ─── Code block ─── */
 pre.code {
   margin: 0; padding: 18px 20px;

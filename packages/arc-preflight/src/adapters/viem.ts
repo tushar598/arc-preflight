@@ -7,6 +7,8 @@
  *   - `preflight()`      — one-shot preflight check for a single transfer
  *   - `preflightMany()`  — one sender, many recipients
  *   - `withPreflight()`  — wraps a WalletClient with automatic preflight guards
+ *   - `planPayout()`     — screen payees and build a PreflightPayout `payMany` tx
+ *   - `readPayoutStats()` — PreflightPayout's lifetime counters
  */
 
 import type {
@@ -21,6 +23,7 @@ import { probe, runPreflight } from '../probe.js'
 import { runPreflightMany, type PreflightManyOptions } from '../batch.js'
 import { transportFromViem } from '../transport.js'
 import { PreflightError } from '../errors.js'
+import { runPlanPayout, fetchPayoutStats, type Payee, type PayoutPlan, type PayoutStats, type PlanPayoutOptions } from '../payout.js'
 import type { PreflightResult, PreflightOptions, PreflightManyResult } from '../types.js'
 
 // ---------------------------------------------------------------------------
@@ -161,4 +164,36 @@ export function withPreflight(
   })
 
   return guardedClient as WalletClient & { __preflight: true }
+}
+
+// ---------------------------------------------------------------------------
+// PreflightPayout
+// ---------------------------------------------------------------------------
+
+/**
+ * Screens every payee with the preflight layers and builds a
+ * `PreflightPayout.payMany` transaction for the ones Arc will accept.
+ *
+ * @example
+ * ```ts
+ * const plan = await planPayout(account.address, [
+ *   { to: alice, amount: parseEther('25') },
+ *   { to: bob, amount: parseEther('25') },
+ * ], publicClient)
+ * for (const s of plan.skip) console.log('skipping', s.to, s.reasonCode)
+ * if (plan.tx) await walletClient.sendTransaction({ account, chain, ...plan.tx })
+ * ```
+ */
+export async function planPayout(
+  payer: Address,
+  payees: readonly Payee[],
+  client: PublicClient,
+  options?: PlanPayoutOptions,
+): Promise<PayoutPlan> {
+  return runPlanPayout(transportFromViem(client), payer, payees, options)
+}
+
+/** PreflightPayout's lifetime counters; `null` if it is not deployed on this network. */
+export async function readPayoutStats(client: PublicClient, address?: Address): Promise<PayoutStats | null> {
+  return fetchPayoutStats(transportFromViem(client), address)
 }

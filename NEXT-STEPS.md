@@ -17,15 +17,22 @@ npm ci        # .npmrc sets legacy-peer-deps for the RainbowKit 2 / wagmi 3 pair
 npm run sdk:test
 ```
 
-Expect `Tests 67 passed (67)`. These run against a fake Arc RPC (`packages/arc-preflight/tests/helpers/fakeArc.ts`) that reproduces the real error shapes, so they cover: safe / blocked / zero-address / precompile verdicts, every layer short-circuit, `stateOverride` rejection fallback, gas-estimate fallback, revert-reason tiers, calldata decoding (ERC-20, EIP-3009, Memo, all Multicall3From variants, nested), `withPreflight` / `withPreflightEthers` blocking before the wallet is called, cache backfill chunking, and the CLI.
+Expect `Tests 79 passed (79)`. These run against a fake Arc RPC (`packages/arc-preflight/tests/helpers/fakeArc.ts`) that reproduces the real error shapes, so they cover: safe / blocked / zero-address / precompile verdicts, every layer short-circuit, `stateOverride` rejection fallback, gas-estimate fallback, revert-reason tiers, calldata decoding (ERC-20, EIP-3009, Memo, all Multicall3From variants, nested), `withPreflight` / `withPreflightEthers` blocking before the wallet is called, cache backfill chunking, and the CLI.
 
 ### 1b. SDK — live tests against Arc Testnet (~15 s, needs internet)
 
 ```bash
+npm run contracts:build    # the payout live test injects the compiled contract via stateOverride
 npm run sdk:test:live
 ```
 
 Expect `Tests 11 passed (11)`. Proves the engine against the real runtime: the seeded testnet blocklisted address, the zero address, a `value: 0` ERC-20 `transfer()` to a blocked address, `preflightMany`, and both adapters' guarded clients.
+
+### 1b′. Contract — Foundry tests (needs `foundryup`)
+
+```bash
+npm run contracts:test     # 12 tests: skip-and-refund, runtime rejection, precompiles, hostile payees, validation
+```
 
 ### 1c. SDK — typecheck and build
 
@@ -93,6 +100,17 @@ npm run build              # SDK + Next.js; routes / and /demo prerender as stat
 `.github/workflows/sync-sanctions.yml` refreshes `data/sanctions.json` every Monday 06:00 UTC and commits if it changed. Trigger it once by hand (Actions → Sync OFAC Sanctions List → Run workflow) to confirm it has `contents: write` on this repo.
 
 ---
+
+### 1j. Deploy PreflightPayout (once per network)
+
+The address is fixed by CREATE2: `0xDcCa5d6603Eb63241763665DB4c95f8c8d51BcDA`. Use a wallet with a little USDC for gas (testnet: https://faucet.circle.com).
+
+```bash
+PRIVATE_KEY=0x… npm run contracts:deploy -- testnet
+PRIVATE_KEY=0x… npm run contracts:deploy -- mainnet      # optional; costs a few cents
+```
+
+The script prints the explorer link and exits "already deployed" if the code is already there. No SDK or app change is needed: both already point at the address. The demo's payout section shows live stats as soon as the code exists.
 
 ## 2. Deploy the demo (Vercel)
 
@@ -172,6 +190,7 @@ If you want npm to require 2FA / provenance later: `npm publish --provenance` fr
 
 - [ ] Repo is **public** (`gh repo edit tushar598/arc-preflight --visibility public`). It is private right now; the grant requires public + MIT.
 - [ ] `main` is green in the Actions tab.
+- [ ] PreflightPayout deployed on Arc Testnet (`npm run contracts:deploy -- testnet`); the demo's payout section shows live stats, not "Not deployed". Run one batch so the counters are non-zero.
 - [ ] Vercel `/demo` shows BLOCKED on mainnet in a fresh incognito window.
 - [ ] `npx arc-preflight 0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b` works from an empty directory.
 - [ ] README / JUDGES.md / submission.md carry the real demo URL and the Loom link.

@@ -37,3 +37,13 @@ Layers 3 and 4 need a JSON-RPC endpoint that supports `eth_call` (with or withou
 ## 9. The local cache only knows what it has seen
 
 `createBlocklistCache()` starts empty unless you give it `lookbackBlocks` / `fromBlock`. Backfill is capped (`maxLookbackBlocks`, default 100,000) and chunked; a failed chunk is reported via `onBackfillError` and skipped. Treat it as an accelerator, never as the source of truth — the SDK never lets a cache *miss* skip the later layers.
+
+## 10. PreflightPayout scope
+
+- **Native USDC only.** `payMany` moves `msg.value` (18 decimals). ERC-20-interface payouts, and payouts of other tokens, are not handled.
+- **50,000 gas per payee.** A payee whose `receive` needs more is skipped and refunded (`UNKNOWN`), not paid. That covers every common smart account, but not arbitrary contracts.
+- **The payer must accept refunds.** If a skipped amount cannot be returned to `msg.sender`, the whole call reverts with `RefundFailed`. That rules out calling from a contract with no `receive`.
+- **Runtime reasons are matched by exact string.** `Blocked address` and `Zero address not allowed` map to `BLOCKLIST` / `ZERO_ADDRESS`. Any other rejection, including a forbidden burn, is reported as `UNKNOWN`, with Arc's text in `detail`.
+- **The plan can go stale.** `planPayout()` reflects the chain at planning time. The contract re-checks at execution, so a payee blocked in between is skipped rather than paid. A payee *unblocked* in between is paid only if it was included in the transaction (`includeSkipped: true`).
+- **Deployment is per network.** The address is the same everywhere, but it has code only where someone has deployed it. `readPayoutStats()` returns `null` on a network with no deployment.
+

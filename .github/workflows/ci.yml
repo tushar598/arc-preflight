@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -43,6 +44,23 @@ jobs:
       - run: npx tsc --noEmit -p tsconfig.json
       - run: npm run build:app
 
+  contracts:
+    name: PreflightPayout — forge test, address pin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: forge fmt --check contracts/src contracts/test
+      - run: forge test --root contracts -vv
+      - name: CREATE2 address matches PREFLIGHT_PAYOUT_ADDRESS in the SDK
+        run: |
+          INIT=$(jq -r .bytecode.object contracts/out/PreflightPayout.sol/PreflightPayout.json)
+          ADDR=$(cast create2 --deployer 0x4e59b44847b379578588920cA78FbF26c0B4956C \
+            --salt "$(cast keccak arc-preflight.PreflightPayout.v1)" --init-code "$INIT" | awk '{print $NF}')
+          echo "computed $ADDR"
+          grep -q "$ADDR" packages/arc-preflight/src/constants.ts || {
+            echo "::error::Contract bytecode changed: update PREFLIGHT_PAYOUT_ADDRESS to $ADDR (and redeploy)"; exit 1; }
+
   live:
     name: SDK — live Arc Testnet (manual)
     if: github.event_name == 'workflow_dispatch'
@@ -53,5 +71,7 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      - uses: foundry-rs/foundry-toolchain@v1
       - run: npm ci
+      - run: forge build --root contracts
       - run: npm run test:live -w arc-preflight

@@ -157,7 +157,13 @@ export type TransferIntent = {
   /** Native wei (18 decimals) for `native`; token units for the others. */
   value: bigint
   /** How this intent was discovered. */
-  via: 'native' | 'erc20' | 'memo' | 'multicall3from'
+  via: 'native' | 'erc20' | 'memo' | 'multicall3from' | 'payout'
+  /**
+   * Calldata to simulate with instead of a bare value send. Set for `payout`
+   * intents: the payer's funds go to PreflightPayout, which only accepts them
+   * through `payMany`, so the real call is what gets simulated.
+   */
+  data?: Hex
 }
 
 /** Result of `preflightMany()`. */

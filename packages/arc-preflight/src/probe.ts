@@ -120,15 +120,18 @@ type SimulationOutcome =
 /**
  * Simulates a native USDC send of `value` wei from `sender` to `recipient`
  * with a virtual sender balance. Falls back to a plain eth_call when the RPC
- * rejects the stateOverride parameter.
+ * rejects the stateOverride parameter. `data` is only passed for calls that
+ * must be simulated as-is (PreflightPayout.payMany).
  */
 export async function simulateNativeSend(
   transport: RpcTransport,
   sender: Address,
   recipient: Address,
   value: bigint,
+  data?: Hex,
 ): Promise<SimulationOutcome> {
-  const tx = { from: sender, to: recipient, value: toHex(value) }
+  const tx: Record<string, string> = { from: sender, to: recipient, value: toHex(value) }
+  if (data) tx.data = data
   const stateOverride = { [sender]: { balance: VIRTUAL_BALANCE_HEX } }
 
   try {
@@ -235,8 +238,12 @@ async function checkPair(
   // (d) simulation — ground truth; always runs unless BLOCKLIST already proven.
   // We always simulate the NATIVE path (even for ERC-20 intents) because it is
   // the only path guaranteed to reach the blocklist check regardless of balance.
-  const simValue = intent.via === 'native' && intent.value > 0n ? intent.value : 1n
-  const sim = await simulateNativeSend(transport, from, to, simValue)
+  // A payout intent is the exception: simulate the real payMany call, which
+  // only reverts if the payer is blocked or the batch itself is malformed.
+  const sim =
+    intent.via === 'payout'
+      ? await simulateNativeSend(transport, from, to, intent.value, intent.data)
+      : await simulateNativeSend(transport, from, to, intent.via === 'native' && intent.value > 0n ? intent.value : 1n)
   if (sim.reverted) {
     return { safe: false, reason: sim.reason, layer: 'simulation', code: classifyRevert(sim.reason, to) }
   }

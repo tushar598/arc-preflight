@@ -14,6 +14,9 @@
  *   - `Multicall3From.aggregate / aggregate3 /
  *     tryAggregate / blockAndAggregate /
  *     tryBlockAndAggregate`                       → recurse into each subcall
+ *   - `PreflightPayout.payMany(…)`                → one `payout` intent to the
+ *     contract; payees are NOT expanded, because the contract skips and refunds
+ *     any payee Arc would reject instead of reverting
  *
  * Memo and Multicall3From route through the CallFrom precompile, which
  * preserves the ORIGINAL `msg.sender`, so inner ERC-20 transfers are
@@ -25,6 +28,8 @@ import {
   ERC20_TRANSFER_ABI,
   MEMO_ABI,
   MULTICALL3FROM_ABI,
+  PREFLIGHT_PAYOUT_ABI,
+  PREFLIGHT_PAYOUT_ADDRESS,
 } from './constants.js'
 import type { TransferIntent } from './types.js'
 
@@ -50,6 +55,10 @@ export function decodeTransferIntents(tx: TxLike): TransferIntent[] {
   const out: TransferIntent[] = []
   const to = tx.to ?? undefined
   const value = tx.value ?? 0n
+
+  if (to && tx.data && isPayMany(to, tx.data)) {
+    return [{ from: tx.from, to, value, via: 'payout', data: tx.data }]
+  }
 
   if (to && value > 0n) {
     out.push({ from: tx.from, to, value, via: 'native' })
@@ -120,6 +129,15 @@ function walk(
     }
     default:
       return
+  }
+}
+
+function isPayMany(to: Address, data: Hex): boolean {
+  if (to.toLowerCase() !== PREFLIGHT_PAYOUT_ADDRESS.toLowerCase()) return false
+  try {
+    return decodeFunctionData({ abi: PREFLIGHT_PAYOUT_ABI, data }).functionName === 'payMany'
+  } catch {
+    return false
   }
 }
 

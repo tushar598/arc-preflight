@@ -8,21 +8,32 @@
  * import { preflight, preflightMany, withPreflight, PreflightError } from 'arc-preflight'
  * import { preflightEthers, withPreflightEthers } from 'arc-preflight'
  * import { checkSanctions, createBlocklistCache, decodeTransferIntents } from 'arc-preflight'
+ * import { planPayout, parsePayoutLogs, PREFLIGHT_PAYOUT_ADDRESS } from 'arc-preflight'
  * import type { PreflightResult, PreflightReasonCode } from 'arc-preflight'
  * ```
  */
 
 // Viem adapter (primary)
-export { preflight, preflightMany, withPreflight } from './adapters/viem.js'
+export { preflight, preflightMany, withPreflight, planPayout, readPayoutStats } from './adapters/viem.js'
 
 // Ethers v6 adapter
-export { preflightEthers, preflightManyEthers, withPreflightEthers } from './adapters/ethers.js'
+export {
+  preflightEthers,
+  preflightManyEthers,
+  withPreflightEthers,
+  planPayoutEthers,
+  readPayoutStatsEthers,
+} from './adapters/ethers.js'
 
 // Transport-level API (bring your own JSON-RPC)
 export { probe, runPreflight, simulateNativeSend, estimateNativeSendGas, isBlacklisted } from './probe.js'
 export { runPreflightMany } from './batch.js'
 export type { PreflightManyOptions } from './batch.js'
 export { httpTransport, transportFromViem, transportFromEthers } from './transport.js'
+
+// PreflightPayout (on-chain batch payouts that skip and refund blocked payees)
+export { runPlanPayout, parsePayoutLogs, fetchPayoutStats } from './payout.js'
+export type { Payee, PayoutPlan, PayoutPlanEntry, PlanPayoutOptions, PayoutReceipt, PayoutStats } from './payout.js'
 
 // Calldata decoding
 export { decodeTransferIntents } from './calldata.js'
@@ -66,6 +77,7 @@ export {
   USDC_ADDRESS,
   MEMO_ADDRESS,
   MULTICALL3FROM_ADDRESS,
+  PREFLIGHT_PAYOUT_ADDRESS,
   SYSTEM_EMITTER_ADDRESS,
   NATIVE_COIN_AUTHORITY_PRECOMPILE_ADDRESS,
   NATIVE_COIN_CONTROL_PRECOMPILE_ADDRESS,
@@ -81,4 +93,5 @@ export {
   ERC20_TRANSFER_ABI,
   MEMO_ABI,
   MULTICALL3FROM_ABI,
+  PREFLIGHT_PAYOUT_ABI,
 } from './constants.js'

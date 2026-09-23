@@ -54,6 +54,17 @@ type PreflightResult = {
 }
 ```
 
+## Batch payouts (on-chain)
+
+`PreflightPayout` at `0xDcCa5d6603Eb63241763665DB4c95f8c8d51BcDA` (mainnet and testnet) pays every payee Arc accepts and refunds the rest in the same transaction, so one blocked address no longer reverts a payroll.
+
+```ts
+const plan = await planPayout(payer, [{ to: alice, amount }, { to: bob, amount }], publicClient)
+plan.skip                                   // predicted off-chain, with reason codes
+await walletClient.sendTransaction(plan.tx!) // PreflightPayout.payMany(…)
+parsePayoutLogs(receipt.logs)                // { paid, skipped, refundedValue }
+```
+
 ## More
 
 - `preflightMany(sender, recipients, client, { concurrency })` — batch.

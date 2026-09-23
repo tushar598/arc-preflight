@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react'
 import { Preflight } from '@/components/Preflight'
 import { WalletSend } from '@/components/WalletSend'
+import { Payout } from '@/components/Payout'
 import { ARC_MAINNET_CHAIN_ID, sanctionsVersion } from 'arc-preflight'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
@@ -102,6 +103,9 @@ export function Landing({ initialRecipient, autoRun }: { initialRecipient?: stri
             <a href="#wallet" className="px-3.5 py-1.5 rounded-md bg-white/[0.06] hover:bg-white/[0.1] text-[#CBD5E1] border border-white/[0.08] transition-colors">
               Test on chain ↓
             </a>
+            <a href="#payout" className="px-3.5 py-1.5 rounded-md bg-white/[0.06] hover:bg-white/[0.1] text-[#CBD5E1] border border-white/[0.08] transition-colors">
+              Batch payouts ↓
+            </a>
             <a href="#install" className="px-3.5 py-1.5 rounded-md bg-white/[0.06] hover:bg-white/[0.1] text-[#CBD5E1] border border-white/[0.08] transition-colors">
               Install ↓
             </a>
@@ -152,6 +156,17 @@ export function Landing({ initialRecipient, autoRun }: { initialRecipient?: stri
           <WalletSend />
         </section>
 
+        {/* ─── Batch payouts (PreflightPayout contract) ─── */}
+        <section id="payout" className="reveal pt-10 pb-10 border-t border-white/[0.06]">
+          <h2 className="text-lg font-semibold text-white tracking-tight mb-1.5">Pay many, skip the bad ones</h2>
+          <p className="text-sm text-[#64748B] mb-6 max-w-lg">
+            One blocked payee reverts a normal batch and you lose the gas for all of them. PreflightPayout
+            pays everyone Arc accepts and refunds the rest in the same transaction. Preflight predicts the split;
+            the contract enforces it.
+          </p>
+          <Payout />
+        </section>
+
         {/* ─── Install ─── */}
         <section id="install" className="reveal pt-10 pb-20 border-t border-white/[0.06]">
           <h2 className="text-lg font-semibold text-white tracking-tight mb-1.5">Two lines to add it</h2>
@@ -173,6 +188,10 @@ export function Landing({ initialRecipient, autoRun }: { initialRecipient?: stri
     `}<span className="c">{`// err.layer:      sanctions | cache | isBlacklisted | simulation`}</span>{`
   }
 }
+
+`}<span className="c">{`// batch payouts: preview off-chain, settle through PreflightPayout`}</span>{`
+`}<span className="k">const</span>{` plan = `}<span className="k">await</span>{` planPayout(payer, [{ to, amount }, …], publicClient)
+`}<span className="k">await</span>{` wallet.sendTransaction(plan.tx)   `}<span className="c">{`// blocked payees are skipped, not reverted`}</span>{`
 
 `}<span className="c">{`# or from a shell, no code at all`}</span>{`
 npx arc-preflight 0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b`}</pre>

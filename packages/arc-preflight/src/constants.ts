@@ -109,6 +109,19 @@ export const ARC_PRECOMPILE_ADDRESSES: readonly Address[] = [
   '0x1800000000000000000000000000000000000004',
 ] as const
 
+/**
+ * PreflightPayout — arc-preflight's own contract (source: `contracts/` in the repo).
+ * `payMany(payees, amounts, ref)` pays native USDC to every payee Arc would
+ * accept and refunds the rest to the payer in the same transaction, so one
+ * blocked address no longer reverts a whole payroll batch.
+ *
+ * Deployed through the deterministic CREATE2 deployer (0x4e59b448…956C), so the
+ * address is identical on Mainnet and Testnet. `readPayoutStats()` returns
+ * `null` on a network where it has not been deployed yet.
+ */
+export const PREFLIGHT_PAYOUT_ADDRESS =
+  '0xDcCa5d6603Eb63241763665DB4c95f8c8d51BcDA' as const
+
 // ---------------------------------------------------------------------------
 // Test fixtures
 // ---------------------------------------------------------------------------
@@ -459,5 +472,119 @@ export const MULTICALL3FROM_ABI = [
         ],
       },
     ],
+  },
+] as const
+
+/**
+ * PreflightPayout ABI (the parts the SDK and apps use). `Reason` values in
+ * `check()` and `Skipped` are 0 None, 1 BLOCKLIST, 2 ZERO_ADDRESS,
+ * 3 PRECOMPILE, 4 BURN_FORBIDDEN, 5 UNKNOWN.
+ */
+export const PREFLIGHT_PAYOUT_ABI = [
+  {
+    type: 'function',
+    name: 'payMany',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'payees', type: 'address[]' },
+      { name: 'amounts', type: 'uint256[]' },
+      { name: 'ref', type: 'bytes32' },
+    ],
+    outputs: [
+      { name: 'paidValue', type: 'uint256' },
+      { name: 'refundedValue', type: 'uint256' },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'check',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'from', type: 'address' },
+      { name: 'to', type: 'address' },
+    ],
+    outputs: [
+      { name: '', type: 'uint8' },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'stats',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [
+      { name: 'batches', type: 'uint64' },
+      { name: 'paidCount', type: 'uint64' },
+      { name: 'skippedCount', type: 'uint64' },
+      { name: 'paidValue', type: 'uint128' },
+      { name: 'protectedValue', type: 'uint128' },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'Paid',
+    anonymous: false,
+    inputs: [
+      { name: 'ref', type: 'bytes32', indexed: true },
+      { name: 'payer', type: 'address', indexed: true },
+      { name: 'payee', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'Skipped',
+    anonymous: false,
+    inputs: [
+      { name: 'ref', type: 'bytes32', indexed: true },
+      { name: 'payer', type: 'address', indexed: true },
+      { name: 'payee', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+      { name: 'reason', type: 'uint8', indexed: false },
+      { name: 'detail', type: 'string', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'Settled',
+    anonymous: false,
+    inputs: [
+      { name: 'ref', type: 'bytes32', indexed: true },
+      { name: 'payer', type: 'address', indexed: true },
+      { name: 'paidCount', type: 'uint256', indexed: false },
+      { name: 'skippedCount', type: 'uint256', indexed: false },
+      { name: 'paidValue', type: 'uint256', indexed: false },
+      { name: 'refundedValue', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'EmptyBatch',
+    inputs: [],
+  },
+  {
+    type: 'error',
+    name: 'LengthMismatch',
+    inputs: [],
+  },
+  {
+    type: 'error',
+    name: 'ZeroAmount',
+    inputs: [
+      { name: 'index', type: 'uint256' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'ValueMismatch',
+    inputs: [
+      { name: 'expected', type: 'uint256' },
+      { name: 'received', type: 'uint256' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'RefundFailed',
+    inputs: [],
   },
 ] as const

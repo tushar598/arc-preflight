@@ -8,6 +8,8 @@
  *   - `preflightEthers()`     — one-shot preflight check using an ethers JsonRpcProvider
  *   - `preflightManyEthers()` — one sender, many recipients
  *   - `withPreflightEthers()` — wraps an ethers Signer with automatic preflight guards
+ *   - `planPayoutEthers()`    — screen payees and build a PreflightPayout `payMany` tx
+ *   - `readPayoutStatsEthers()` — PreflightPayout's lifetime counters
  *
  * Why different names from the Viem adapter?
  *   Both adapters live in the same package entry point. Using different names
@@ -21,6 +23,7 @@ import { probe, runPreflight } from '../probe.js'
 import { runPreflightMany, type PreflightManyOptions } from '../batch.js'
 import { transportFromEthers } from '../transport.js'
 import { PreflightError } from '../errors.js'
+import { runPlanPayout, fetchPayoutStats, type Payee, type PayoutPlan, type PayoutStats, type PlanPayoutOptions } from '../payout.js'
 
 type EthersProviderLike = Pick<JsonRpcProvider, 'send'>
 
@@ -132,4 +135,26 @@ export function withPreflightEthers<T extends Signer>(
   })
 
   return guardedSigner as T & { __preflight: true }
+}
+
+// ---------------------------------------------------------------------------
+// PreflightPayout
+// ---------------------------------------------------------------------------
+
+/** Ethers flavour of `planPayout()`. */
+export async function planPayoutEthers(
+  payer: string,
+  payees: readonly Payee[],
+  provider: EthersProviderLike,
+  options?: PlanPayoutOptions,
+): Promise<PayoutPlan> {
+  return runPlanPayout(transportFromEthers(provider), payer as Address, payees, options)
+}
+
+/** Ethers flavour of `readPayoutStats()`. */
+export async function readPayoutStatsEthers(
+  provider: EthersProviderLike,
+  address?: string,
+): Promise<PayoutStats | null> {
+  return fetchPayoutStats(transportFromEthers(provider), address as Address | undefined)
 }
