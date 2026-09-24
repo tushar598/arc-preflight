@@ -16,13 +16,16 @@ import {
   planPayout,
   readPayoutStats,
   TESTNET_BLOCKLISTED_ADDRESS,
+  MAINNET_DEMO_BLOCKED_ADDRESS,
   ARC_TESTNET_RPC_URL,
+  ARC_MAINNET_RPC_URL,
   PREFLIGHT_PAYOUT_ABI,
   PREFLIGHT_PAYOUT_ADDRESS,
   ZERO_ADDRESS,
 } from '../../src/index.js'
 
 const client = createPublicClient({ transport: http(ARC_TESTNET_RPC_URL) })
+const mainnet = createPublicClient({ transport: http(ARC_MAINNET_RPC_URL) })
 
 const SENDER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as const
 const CLEAN = '0x1111111111111111111111111111111111111111' as const
@@ -74,3 +77,26 @@ describe('PreflightPayout — Arc Testnet runtime', () => {
     else expect(stats).toBeNull()
   })
 })
+
+describe('PreflightPayout — Arc mainnet runtime', () => {
+  it('refunds the OFAC-listed payee and pays the clean one, as planned', async () => {
+    const payees = [CLEAN, MAINNET_DEMO_BLOCKED_ADDRESS].map((to) => ({ to, amount: 1000n }))
+    const plan = await planPayout(SENDER, payees, mainnet, { includeSkipped: true })
+    expect(plan.skip).toMatchObject([{ to: MAINNET_DEMO_BLOCKED_ADDRESS, reasonCode: 'BLOCKLIST', layer: 'sanctions' }])
+
+    // Simulation only: nothing is broadcast, so no transaction ever names the sanctioned address.
+    const { data } = await mainnet.call({
+      account: SENDER,
+      to: plan.tx!.to,
+      value: plan.tx!.value,
+      data: plan.tx!.data,
+      stateOverride: [
+        { address: SENDER, balance: 10n ** 24n },
+        { address: PREFLIGHT_PAYOUT_ADDRESS, code: runtimeCode() },
+      ],
+    })
+    const [paidValue, refundedValue] = decodeFunctionResult({ abi: PREFLIGHT_PAYOUT_ABI, functionName: 'payMany', data: data! })
+    expect([paidValue, refundedValue]).toEqual([plan.payValue, plan.skipValue])
+  })
+})
+

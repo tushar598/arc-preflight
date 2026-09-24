@@ -23,26 +23,31 @@ import {
   withPreflight,
   PreflightError,
   PREFLIGHT_PAYOUT_ADDRESS,
+  MAINNET_DEMO_BLOCKED_ADDRESS,
   TESTNET_BLOCKLISTED_ADDRESS,
   ZERO_ADDRESS,
-  ARC_TESTNET_CHAIN_ID,
-  ARC_TESTNET_EXPLORER_URL,
   type Payee,
   type PayoutPlan,
   type PayoutReceipt,
   type PayoutStats,
 } from 'arc-preflight'
-import { arcTestnet } from '@/lib/chains'
+import { CHAINS, type ChainKey } from '@/lib/chains'
 
 /** Same zero-balance test account the read-only check uses; the probe gives it a virtual balance. */
 const PREVIEW_PAYER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as const
+const CLEAN = '0x1111111111111111111111111111111111111111'
 
-const DEFAULT_LINES = [
-  '0x1111111111111111111111111111111111111111, 0.001',
-  `${TESTNET_BLOCKLISTED_ADDRESS}, 0.001`,
-  `${ZERO_ADDRESS}, 0.001`,
-  '0x2222222222222222222222222222222222222222, 0.001',
-].join('\n')
+/**
+ * Mainnet pays real USDC, so its clean payee is the connected wallet itself:
+ * trying the demo costs only gas. Testnet uses throwaway clean addresses.
+ */
+function defaultLines(chainKey: ChainKey, you?: Address): string {
+  const lines =
+    chainKey === 'mainnet'
+      ? [`${you ?? CLEAN}, 0.001`, `${MAINNET_DEMO_BLOCKED_ADDRESS}, 0.001`, `${ZERO_ADDRESS}, 0.001`]
+      : [`${CLEAN}, 0.001`, `${TESTNET_BLOCKLISTED_ADDRESS}, 0.001`, `${ZERO_ADDRESS}, 0.001`, '0x2222222222222222222222222222222222222222, 0.001']
+  return lines.join('\n')
+}
 
 type Parsed = { payees: Payee[]; error: string | null }
 
@@ -71,12 +76,16 @@ type Sent = { hash: Hash; status: 'pending' | 'success' | 'reverted'; receipt?: 
 
 export function Payout() {
   const { address, isConnected } = useAccount()
-  const chainId = useChainId()
+  const walletChainId = useChainId()
   const { switchChain, isPending: switching } = useSwitchChain()
   const { data: walletClient } = useWalletClient()
-  const client = useMemo(() => createPublicClient({ chain: arcTestnet, transport: http() }) as PublicClient, [])
 
-  const [text, setText] = useState(DEFAULT_LINES)
+  const [chainKey, setChainKey] = useState<ChainKey>('mainnet')
+  const chain = CHAINS[chainKey]
+  const explorer = chain.blockExplorers.default.url
+  const client = useMemo(() => createPublicClient({ chain, transport: http() }) as PublicClient, [chain])
+
+  const [custom, setCustom] = useState<string | null>(null)
   const [includeSkipped, setIncludeSkipped] = useState(true)
   const [plan, setPlan] = useState<PayoutPlan | null>(null)
   const [busy, setBusy] = useState<'plan' | 'send' | null>(null)
@@ -85,9 +94,13 @@ export function Payout() {
   const [stats, setStats] = useState<PayoutStats | null | undefined>(undefined)
   const [statsTick, setStatsTick] = useState(0)
 
+  const text = custom ?? defaultLines(chainKey, address)
   const parsed = useMemo(() => parseLines(text), [text])
-  const onTestnet = chainId === ARC_TESTNET_CHAIN_ID
+  const onChain = walletChainId === chain.id
   const deployed = stats != null
+  // Blocklisted payees never go into a real mainnet transaction; the planner
+  // leaves them out. Routing them through the contract is a testnet showcase.
+  const recordSkips = chainKey === 'testnet' && includeSkipped
 
   useEffect(() => {
     let live = true
@@ -98,13 +111,23 @@ export function Payout() {
     return () => { live = false }
   }, [client, statsTick])
 
+  function selectChain(k: ChainKey) {
+    if (k === chainKey) return
+    setChainKey(k)
+    setCustom(null)
+    setPlan(null)
+    setSent(null)
+    setError(null)
+    setStats(undefined)
+  }
+
   async function preview() {
     if (parsed.error) return
     setBusy('plan')
     setError(null)
     setSent(null)
     try {
-      setPlan(await planPayout(address ?? PREVIEW_PAYER, parsed.payees, client, { includeSkipped }))
+      setPlan(await planPayout(address ?? PREVIEW_PAYER, parsed.payees, client, { includeSkipped: recordSkips }))
     } catch (err) {
       setError(firstLine(err))
     } finally {
@@ -113,22 +136,22 @@ export function Payout() {
   }
 
   async function pay() {
-    if (!walletClient || !address || parsed.error) return
+    if (!walletClient || !address || parsed.error || !onChain) return
     setBusy('send')
     setError(null)
     setSent(null)
     try {
       // Re-plan with the real payer: a blocked payer is caught here, before any gas.
       const ref = keccak256(toHex(`arc-preflight demo ${address} ${Date.now()}`))
-      const p = await planPayout(address, parsed.payees, client, { includeSkipped, ref })
+      const p = await planPayout(address, parsed.payees, client, { includeSkipped: recordSkips, ref })
       setPlan(p)
       if (!p.tx) {
         setError('Every payee would be skipped, so there is nothing to send.')
         return
       }
-      const included = includeSkipped ? p.entries.map((e) => e.to) : p.pay.map((e) => e.to)
+      const included = recordSkips ? p.entries.map((e) => e.to) : p.pay.map((e) => e.to)
       const guarded = withPreflight(walletClient as unknown as WalletClient, client)
-      const hash = await guarded.sendTransaction({ ...p.tx, account: walletClient.account, chain: arcTestnet })
+      const hash = await guarded.sendTransaction({ ...p.tx, account: walletClient.account, chain })
       setSent({ hash, status: 'pending', included })
       const receipt = await client.waitForTransactionReceipt({ hash, timeout: 60_000 })
       setSent({ hash, status: receipt.status, receipt: parsePayoutLogs(receipt.logs), included })
@@ -147,26 +170,32 @@ export function Payout() {
           <b style={{ fontWeight: 500 }}>Batch payout through PreflightPayout</b>
           <div className="note">
             Contract{' '}
-            <a className="mono link" href={`${ARC_TESTNET_EXPLORER_URL}/address/${PREFLIGHT_PAYOUT_ADDRESS}`} target="_blank" rel="noreferrer">
+            <a className="mono link" href={`${explorer}/address/${PREFLIGHT_PAYOUT_ADDRESS}`} target="_blank" rel="noreferrer">
               {short(PREFLIGHT_PAYOUT_ADDRESS)}
-            </a>{' '}
-            on Arc Testnet, same address on mainnet.
+            </a>
+            , same address on Arc mainnet and testnet.
           </div>
         </div>
         <ConnectButton chainStatus="name" showBalance={false} />
       </div>
 
-      <div className="tally" style={{ marginTop: 14 }}>
-        {stats === undefined && <span>Reading contract…</span>}
-        {stats === null && <span>Not deployed on Arc Testnet yet. The preview still works.</span>}
-        {stats && (
-          <>
-            <span>On-chain so far: <strong>{stats.batches.toString()}</strong> batches</span>
-            <span><strong>{stats.paidCount.toString()}</strong> paid</span>
-            <span><strong>{stats.skippedCount.toString()}</strong> skipped</span>
-            <span><strong>{formatEther(stats.protectedValue)} USDC</strong> refunded instead of lost</span>
-          </>
-        )}
+      <div className="probe-meta">
+        <span className="seg" role="group" aria-label="Network">
+          <button aria-pressed={chainKey === 'mainnet'} onClick={() => selectChain('mainnet')}>Arc mainnet</button>
+          <button aria-pressed={chainKey === 'testnet'} onClick={() => selectChain('testnet')}>Testnet</button>
+        </span>
+        <span className="tally" style={{ marginTop: 0 }}>
+          {stats === undefined && <span>Reading contract…</span>}
+          {stats === null && <span>Not deployed on {chain.name} yet. The preview still works.</span>}
+          {stats && (
+            <>
+              <span>On-chain so far: <strong>{stats.batches.toString()}</strong> batches</span>
+              <span><strong>{stats.paidCount.toString()}</strong> paid</span>
+              <span><strong>{stats.skippedCount.toString()}</strong> skipped</span>
+              <span><strong>{formatEther(stats.protectedValue)} USDC</strong> refunded instead of lost</span>
+            </>
+          )}
+        </span>
       </div>
 
       <div style={{ marginTop: 18 }}>
@@ -174,33 +203,40 @@ export function Payout() {
         <textarea
           id="payees"
           className="input"
-          rows={5}
+          rows={chainKey === 'mainnet' ? 4 : 5}
           data-state={parsed.error && text.trim() ? 'invalid' : undefined}
           value={text}
-          onChange={(e) => { setText(e.target.value); setPlan(null); setSent(null) }}
+          onChange={(e) => { setCustom(e.target.value); setPlan(null); setSent(null) }}
           spellCheck={false}
           style={{ resize: 'vertical', lineHeight: 1.6 }}
         />
-        <label className="note check">
-          <input type="checkbox" checked={includeSkipped} onChange={(e) => { setIncludeSkipped(e.target.checked); setPlan(null) }} />
-          Send blocked payees through the contract too. It refunds them and writes a <span className="mono">Skipped</span> event, so the screening is on-chain.
-        </label>
+        {chainKey === 'testnet' ? (
+          <label className="note check">
+            <input type="checkbox" checked={includeSkipped} onChange={(e) => { setIncludeSkipped(e.target.checked); setPlan(null) }} />
+            Send blocked payees through the contract too. It refunds them and writes a <span className="mono">Skipped</span> event, so the screening is on-chain.
+          </label>
+        ) : (
+          <p className="note" style={{ marginTop: 10 }}>
+            Real USDC. The first line is {address ? 'your own wallet' : 'your wallet once connected'}, so trying it costs only gas.
+            Blocklisted payees are left out of the transaction, never sent to the contract; the contract still refuses anyone Arc blocks by the time it lands.
+          </p>
+        )}
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14, alignItems: 'center' }}>
           <button className="btn btn-ghost" disabled={!!parsed.error || busy !== null} onClick={preview}>
             {busy === 'plan' ? 'Checking…' : 'Preview'}
           </button>
-          {isConnected && onTestnet && (
+          {isConnected && onChain && (
             <button className="btn btn-primary" disabled={!!parsed.error || busy !== null || !deployed} onClick={pay}>
               {busy === 'send' ? 'Paying…' : `Pay ${parsed.payees.length} payees`}
             </button>
           )}
-          {isConnected && !onTestnet && (
-            <button className="btn btn-ghost" disabled={switching} onClick={() => switchChain({ chainId: ARC_TESTNET_CHAIN_ID })}>
-              {switching ? 'Switching…' : 'Switch to Arc Testnet to pay'}
+          {isConnected && !onChain && (
+            <button className="btn btn-ghost" disabled={switching} onClick={() => switchChain({ chainId: chain.id })}>
+              {switching ? 'Switching…' : `Switch to ${chain.name} to pay`}
             </button>
           )}
-          <span className="note">{parsed.error ?? (isConnected ? '' : 'Preview needs no wallet. Connect one on testnet to pay.')}</span>
+          <span className="note">{parsed.error ?? (isConnected ? '' : `Preview needs no wallet. Connect one on ${chain.name} to pay.`)}</span>
         </div>
       </div>
 
@@ -242,7 +278,7 @@ export function Payout() {
 
       {sent && (
         <div className="result-line">
-          <a href={`${ARC_TESTNET_EXPLORER_URL}/tx/${sent.hash}`} target="_blank" rel="noreferrer">View on explorer</a>.{' '}
+          <a href={`${explorer}/tx/${sent.hash}`} target="_blank" rel="noreferrer">View on explorer</a>.{' '}
           {sent.status === 'pending' && 'Waiting for the receipt…'}
           {sent.status === 'reverted' && <>The transaction <span className="mono">reverted</span>.</>}
           {sent.status === 'success' && sent.receipt && (
