@@ -4,6 +4,11 @@
 
 `0xDcCa5d6603Eb63241763665DB4c95f8c8d51BcDA`: the same address on Arc mainnet (5042) and Arc Testnet (5042002). It is deployed through the deterministic CREATE2 deployer, so the address is fixed by the bytecode.
 
+| Network | Deploy | First batch |
+|---------|--------|-------------|
+| Mainnet | [`0x9f7a…e98f`](https://explorer.arc.io/tx/0x9f7ad1c480683ca82e2d7c83e4a510bdf90764e2c1ea01944f0f1a0bac6ae98f) (1,012,003 gas ≈ 0.020 USDC) | [`0x9862…0536`](https://explorer.arc.io/tx/0x9862253558bae9fdf8e016466ee2f2f11aa66ecdbe90ce9836ebc30e33ab0536): 1 paid, `0x0` refunded |
+| Testnet | [`0xd6c4…9099`](https://explorer.testnet.arc.io/tx/0xd6c4d2d31bd3a311a6dcf3832b8bed79b2b53d375ab52a61fcff47134a899099) | [`0xd48c…51e1`](https://explorer.testnet.arc.io/tx/0xd48cd3c89186fc31f6c2bf17d81327575263d0502d6393c887037a3839cd51e1): 2 paid, blocklisted + `0x0` refunded |
+
 ## Why it exists
 
 The SDK stops a *single* bad transfer before it is broadcast. A batch is different. Pay 50 people through a normal multicall and have one of them be on Arc's blocklist, and the whole transaction is included, reverts, and burns the gas for all 50. Nobody gets paid.

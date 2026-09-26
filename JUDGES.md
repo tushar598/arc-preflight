@@ -8,7 +8,7 @@
 2. Press **Clean address** → **Run preflight**. All four layers turn clear; the gas figure is now a live `eth_estimateGas` (21,000).
 3. Press **Zero address** → **Run preflight**. Layers 1–3 clear; layer 4 (the `eth_call` simulation) catches it: **ZERO_ADDRESS · "Zero address not allowed"**. This is the case `isBlacklisted()` alone can never see.
 4. Optional, with a wallet on **Arc Testnet**: scroll to *Then try it against the real chain*. **Send with preflight** stops before broadcast. **Send anyway** broadcasts, and the explorer shows the transaction included, reverted, gas consumed. That delta is the product.
-5. Scroll to **Pay many, skip the bad ones**. The payee list mixes clean addresses with the testnet blocklisted address and `0x0`. Press **Preview**, no wallet needed: each row says *pay* or *skip*, with the layer that caught it. With a testnet wallet, press **Pay 4 payees**. That sends one `payMany` transaction to our **PreflightPayout** contract. It succeeds, the clean payees are paid, the blocked ones are refunded with a `Skipped` event, and the on-chain counter goes up. A plain multicall would have reverted the whole batch.
+5. Scroll to **Pay many, skip the bad ones**. It opens on Arc mainnet with live contract counters. The payee list mixes a clean payee with the OFAC address and `0x0`. Press **Preview**, no wallet needed: each row says *pay* or *skip*, with the layer that caught it. On mainnet the clean payee is your own wallet, so paying costs only gas, and blocklisted payees are never put in the transaction. Switch to **Testnet** to see the full show: with a testnet wallet, press **Pay 4 payees**. That sends one `payMany` transaction to our **PreflightPayout** contract. It succeeds, the clean payees are paid, the blocked ones are refunded with a `Skipped` event, and the on-chain counter goes up. A plain multicall would have reverted the whole batch.
 
 ## Addresses used
 
@@ -20,6 +20,8 @@
 | Contract | Address (mainnet and testnet) | Source |
 |----------|-------------------------------|--------|
 | PreflightPayout | `0xDcCa5d6603Eb63241763665DB4c95f8c8d51BcDA` | [`contracts/src/PreflightPayout.sol`](contracts/src/PreflightPayout.sol): CREATE2, no owner, 12 Foundry tests |
+
+On Arc mainnet: [deploy tx](https://explorer.arc.io/tx/0x9f7ad1c480683ca82e2d7c83e4a510bdf90764e2c1ea01944f0f1a0bac6ae98f) · [first batch](https://explorer.arc.io/tx/0x9862253558bae9fdf8e016466ee2f2f11aa66ecdbe90ce9836ebc30e33ab0536). The first mainnet batch had 2 payees: the deployer paid itself, and `0x0` was refunded with a `Skipped` event (`ZERO_ADDRESS`).
 
 On Arc Testnet: [deploy tx](https://explorer.testnet.arc.io/tx/0xd6c4d2d31bd3a311a6dcf3832b8bed79b2b53d375ab52a61fcff47134a899099) · [first batch](https://explorer.testnet.arc.io/tx/0xd48cd3c89186fc31f6c2bf17d81327575263d0502d6393c887037a3839cd51e1). The first batch had 4 payees: 2 clean ones were paid; the seeded blocklisted address and `0x0` were refunded with `Skipped` events. The transaction succeeded and used 138,446 gas.
 

@@ -11,7 +11,7 @@ Arc enforces its USDC blocklist at runtime: a transfer to a sanctioned address i
 - Live demo: `https://arc-preflight.vercel.app` (`/demo` for the one-click blocked path)
 - Repo: https://github.com/tushar598/arc-preflight
 - npm: https://www.npmjs.com/package/arc-preflight
-- Contract: PreflightPayout `0xDcCa5d6603Eb63241763665DB4c95f8c8d51BcDA`: https://explorer.testnet.arc.io/address/0xDcCa5d6603Eb63241763665DB4c95f8c8d51BcDA
+- Contract: PreflightPayout `0xDcCa5d6603Eb63241763665DB4c95f8c8d51BcDA` on Arc mainnet: https://explorer.arc.io/address/0xDcCa5d6603Eb63241763665DB4c95f8c8d51BcDA (same address on testnet)
 - 90-second walkthrough video: *(add Loom link)*
 
 ## Tags

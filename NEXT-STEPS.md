@@ -103,6 +103,8 @@ npm run build              # SDK + Next.js; routes / and /demo prerender as stat
 
 ### 1j. Deploy PreflightPayout (once per network)
 
+**Done on both networks (2026-09-26 mainnet, 2026-09-23 testnet).** These commands are kept for reference; re-running them only prints "already deployed".
+
 The address is fixed by CREATE2: `0xDcCa5d6603Eb63241763665DB4c95f8c8d51BcDA`. Use a wallet with a little USDC for gas (testnet: https://faucet.circle.com).
 
 ```bash
@@ -190,7 +192,7 @@ If you want npm to require 2FA / provenance later: `npm publish --provenance` fr
 
 - [ ] Repo is **public** (`gh repo edit tushar598/arc-preflight --visibility public`). It is private right now; the grant requires public + MIT.
 - [ ] `main` is green in the Actions tab.
-- [ ] PreflightPayout deployed on Arc Testnet (`npm run contracts:deploy -- testnet`); the demo's payout section shows live stats, not "Not deployed". Run one batch so the counters are non-zero.
+- [x] PreflightPayout deployed on Arc mainnet and testnet (`npm run contracts:deploy -- testnet`); the demo's payout section shows live stats, not "Not deployed". Run one batch so the counters are non-zero.
 - [ ] Vercel `/demo` shows BLOCKED on mainnet in a fresh incognito window.
 - [ ] `npx arc-preflight 0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b` works from an empty directory.
 - [ ] README / JUDGES.md / submission.md carry the real demo URL and the Loom link.

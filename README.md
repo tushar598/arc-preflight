@@ -66,7 +66,7 @@ Layers 1–3 can only *prove* a blocklist hit and short-circuit when they do. La
 
 ## On-chain: PreflightPayout
 
-The SDK stops a single bad send before it is broadcast. Batches need more than that. One blocklisted payee in a normal multicall reverts the whole payroll, and you pay gas for all of it. [`PreflightPayout`](contracts/) is arc-preflight's own contract at **`0xDcCa5d6603Eb63241763665DB4c95f8c8d51BcDA`** (the same address on mainnet and testnet, via CREATE2). It runs the same checks on-chain, pays every payee Arc accepts, and refunds the rest to the payer in the same transaction, with a `Skipped` event for each one.
+The SDK stops a single bad send before it is broadcast. Batches need more than that. One blocklisted payee in a normal multicall reverts the whole payroll, and you pay gas for all of it. [`PreflightPayout`](contracts/) is arc-preflight's own contract at **`0xDcCa5d6603Eb63241763665DB4c95f8c8d51BcDA`**, deployed on [Arc mainnet](https://explorer.arc.io/address/0xDcCa5d6603Eb63241763665DB4c95f8c8d51BcDA) and testnet at the same address via CREATE2. It runs the same checks on-chain, pays every payee Arc accepts, and refunds the rest to the payer in the same transaction, with a `Skipped` event for each one.
 
 ```ts
 import { planPayout, parsePayoutLogs } from 'arc-preflight'
